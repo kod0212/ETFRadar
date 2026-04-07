@@ -2,12 +2,16 @@
   <div>
     <a-page-header :title="fundName" :sub-title="code" @back="$router.push('/')" />
 
-    <!-- 趋势图 -->
-    <a-card title="份额趋势" size="small" style="margin-bottom: 16px">
+    <a-card title="趋势图" size="small" style="margin-bottom: 16px">
+      <template #extra>
+        <a-radio-group v-model:value="metric" size="small" @change="loadTrend">
+          <a-radio-button value="market_cap">总市值</a-radio-button>
+          <a-radio-button value="shares">份额</a-radio-button>
+        </a-radio-group>
+      </template>
       <div ref="chartRef" style="height: 360px"></div>
     </a-card>
 
-    <!-- 数据表格 -->
     <a-card title="历史数据" size="small">
       <a-table :dataSource="shares" :columns="columns" rowKey="trade_date" size="small" :pagination="{ pageSize: 20 }">
         <template #bodyCell="{ column, record }">
@@ -23,7 +27,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import * as echarts from 'echarts'
 import { getShares, getSharesTrend } from '../api'
@@ -32,7 +36,12 @@ const route = useRoute()
 const code = route.params.code as string
 const fundName = ref(code)
 const shares = ref<any[]>([])
+const trendData = ref<any[]>([])
+const metric = ref('market_cap')
 const chartRef = ref<HTMLElement>()
+let chart: echarts.ECharts | null = null
+
+const metricLabel = computed(() => metric.value === 'market_cap' ? '总市值(亿元)' : '份额(亿份)')
 
 const columns = [
   { title: '日期', dataIndex: 'trade_date', key: 'trade_date', width: 120 },
@@ -46,23 +55,29 @@ const columns = [
   { title: '数据源', dataIndex: 'source', key: 'source', width: 80 },
 ]
 
+const renderChart = () => {
+  if (!chartRef.value) return
+  if (!chart) chart = echarts.init(chartRef.value)
+  chart.setOption({
+    tooltip: { trigger: 'axis' },
+    xAxis: { type: 'category', data: trendData.value.map(d => d.trade_date) },
+    yAxis: { type: 'value', name: metricLabel.value, scale: true },
+    series: [{ type: 'line', data: trendData.value.map(d => d.value), smooth: true, areaStyle: { opacity: 0.15 } }],
+    grid: { left: 80, right: 20, top: 40, bottom: 30 },
+  })
+}
+
+const loadTrend = async () => {
+  const res = await getSharesTrend({ code, metric: metric.value })
+  trendData.value = res.data.data || []
+  renderChart()
+}
+
 onMounted(async () => {
-  const [sharesRes, trendRes] = await Promise.all([
+  const [sharesRes] = await Promise.all([
     getShares({ code, limit: 500 }),
-    getSharesTrend({ code }),
   ])
   shares.value = sharesRes.data.data || []
-  const trend = trendRes.data.data || []
-
-  if (chartRef.value && trend.length) {
-    const chart = echarts.init(chartRef.value)
-    chart.setOption({
-      tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: trend.map((d: any) => d.trade_date) },
-      yAxis: { type: 'value', name: '份额(亿份)', scale: true },
-      series: [{ type: 'line', data: trend.map((d: any) => d.value), smooth: true, areaStyle: { opacity: 0.15 } }],
-      grid: { left: 60, right: 20, top: 40, bottom: 30 },
-    })
-  }
+  await loadTrend()
 })
 </script>

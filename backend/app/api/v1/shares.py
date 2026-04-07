@@ -87,6 +87,7 @@ def shares_summary(
 def shares_trend(
     code: Optional[str] = None,
     group: Optional[str] = None,
+    metric: str = Query(default="market_cap", description="market_cap 或 shares"),
     start: Optional[date] = None,
     end: Optional[date] = None,
     db: Session = Depends(get_db),
@@ -96,23 +97,25 @@ def shares_trend(
     if not end:
         end = date.today()
 
+    col = ETFShare.total_market_cap if metric == "market_cap" else ETFShare.shares
+
     if code:
-        rows = db.query(ETFShare.trade_date, ETFShare.shares).filter(
+        rows = db.query(ETFShare.trade_date, col).filter(
             ETFShare.fund_code == code,
             ETFShare.trade_date >= start,
             ETFShare.trade_date <= end,
-            ETFShare.shares.isnot(None),
+            col.isnot(None),
         ).order_by(ETFShare.trade_date).all()
         data = [TrendPoint(trade_date=r[0], value=round(r[1], 2)) for r in rows]
     elif group:
         rows = db.query(
             ETFShare.trade_date,
-            func.sum(ETFShare.shares).label("total"),
+            func.sum(col).label("total"),
         ).join(ETFFund, ETFShare.fund_code == ETFFund.code).filter(
             ETFFund.group_tag == group,
             ETFShare.trade_date >= start,
             ETFShare.trade_date <= end,
-            ETFShare.shares.isnot(None),
+            col.isnot(None),
         ).group_by(ETFShare.trade_date).order_by(ETFShare.trade_date).all()
         data = [TrendPoint(trade_date=r[0], value=round(r[1], 2)) for r in rows]
     else:

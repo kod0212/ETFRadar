@@ -134,17 +134,17 @@ def backfill_history(days: int = 90):
 
                 for item in hist:
                     hist_price = item["close"]
-                    est_mcap = round(base_mcap * hist_price / base_price, 2)
-                    est_shares = round(est_mcap / hist_price, 4) if hist_price > 0 else None
+                    trade_dt = date.fromisoformat(item["day"])
+                    # 份额近似不变，市值 = 基准份额 * 历史价格
+                    base_shares = base["shares"]
+                    est_mcap = round(base_shares * hist_price, 2)
 
-                    from datetime import date as date_type
-                    trade_dt = date_type.fromisoformat(item["day"])
                     records.append(ETFShare(
                         fund_code=fund.code,
                         trade_date=trade_dt,
                         price=hist_price,
                         total_market_cap=est_mcap,
-                        shares=est_shares,
+                        shares=base_shares,
                         change_shares=None,
                         source="backfill",
                     ))
