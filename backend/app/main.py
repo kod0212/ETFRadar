@@ -1,11 +1,25 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from app.core.database import init_db
 
-app = FastAPI(title="ETF雷达", version="0.1.0")
+app = FastAPI(title="ETF雷达", version="0.1.0", docs_url="/api/docs")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+@app.on_event("startup")
+def startup():
+    init_db()
 
 
 @app.get("/")
 def root():
-    return {"message": "ETF雷达 API"}
+    return {"message": "ETF雷达 API", "docs": "/api/docs"}
 
 
 if __name__ == "__main__":
