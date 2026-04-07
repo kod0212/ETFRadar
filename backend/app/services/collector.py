@@ -51,14 +51,12 @@ def collect_today(db: Session = None) -> dict:
         count = 0
 
         for item in data:
-            # 查前一日份额算变化
             prev = db.query(ETFShare).filter(
                 ETFShare.fund_code == item["code"],
                 ETFShare.trade_date < today
             ).order_by(ETFShare.trade_date.desc()).first()
             change = round(item["shares"] - prev.shares, 4) if prev and prev.shares else None
 
-            # upsert
             existing = db.query(ETFShare).filter(
                 ETFShare.fund_code == item["code"],
                 ETFShare.trade_date == today
@@ -94,41 +92,102 @@ def collect_today(db: Session = None) -> dict:
             db.close()
 
 
-def backfill_history(days: int = 60):
-    """用AKShare回补历史行情数据（仅etf_share表为空时执行）"""
+def backfill_history(days: int = 90):
+    """
+    回补历史数据:
+    1. 先用腾讯接口获取当前份额(作为基准)
+    2. 用AKShare获取历史价格
+    3. 假设份额短期不变, 用基准份额 * 历史价格/当前价格 近似历史市值
+       份额本身直接用基准值(ETF份额短期变化较小, 足够看趋势)
+    """
     db = SessionLocal()
     try:
-        if db.query(ETFShare).count() > 0:
-            print("[backfill] etf_share 已有数据，跳过历史回补")
+        existing_count = db.query(ETFShare).count()
+        if existing_count > 1:
+            print(f"[backfill] etf_share 已有 {existing_count} 条数据，跳过")
             return
 
-        import akshare as ak
         funds = db.query(ETFFund).filter(ETFFund.is_active == True).all()
+        if not funds:
+            return
+
+        # 1. 获取当前实时数据作为基准
+        codes = [{"code": f.code, "market": f.market} for f in funds]
+        realtime = fetch_etf_realtime(codes)
+        baseline = {item["code"]: item for item in realtime}
+
+        # 2. 用AKShare回补历史价格
+        import akshare as ak
         end = date.today().strftime("%Y%m%d")
         start = (date.today() - timedelta(days=days)).strftime("%Y%m%d")
 
         for fund in funds:
+            base = baseline.get(fund.code)
+            if not base or base["price"] <= 0:
+                print(f"[backfill] {fund.code} 无基准数据，跳过")
+                continue
+
             try:
                 df = ak.fund_etf_hist_em(
                     symbol=fund.code, period="daily",
                     start_date=start, end_date=end, adjust=""
                 )
+                if df.empty:
+                    continue
+
+                records = []
+                base_price = base["price"]
+                base_shares = base["shares"]
+                base_mcap = base["total_market_cap"]
+
                 for _, row in df.iterrows():
-                    db.add(ETFShare(
+                    hist_price = float(row["收盘"])
+                    # 近似: 份额短期稳定, 市值随价格变化
+                    est_mcap = round(base_mcap * hist_price / base_price, 2)
+                    est_shares = round(est_mcap / hist_price, 4) if hist_price > 0 else None
+
+                    records.append(ETFShare(
                         fund_code=fund.code,
                         trade_date=row["日期"],
-                        price=row["收盘"],
-                        total_market_cap=None,
-                        shares=None,
+                        price=hist_price,
+                        total_market_cap=est_mcap,
+                        shares=est_shares,
                         change_shares=None,
-                        source="akshare",
+                        source="backfill",
                     ))
+
+                # 批量写入
+                for r in records:
+                    existing = db.query(ETFShare).filter(
+                        ETFShare.fund_code == r.fund_code,
+                        ETFShare.trade_date == r.trade_date
+                    ).first()
+                    if not existing:
+                        db.add(r)
                 db.commit()
-                print(f"[backfill] {fund.code} {fund.name}: {len(df)} 条")
-                time.sleep(1)  # 避免限流
+                print(f"[backfill] {fund.code} {fund.name}: {len(records)} 条")
+                time.sleep(1)
             except Exception as e:
                 db.rollback()
                 print(f"[backfill] {fund.code} 失败: {e}")
                 time.sleep(2)
+
+        # 3. 补算 change_shares
+        _calc_change_shares(db)
+        print("[backfill] 历史数据回补完成")
     finally:
         db.close()
+
+
+def _calc_change_shares(db: Session):
+    """补算所有缺失的 change_shares"""
+    funds = db.query(ETFFund).filter(ETFFund.is_active == True).all()
+    for fund in funds:
+        rows = db.query(ETFShare).filter(
+            ETFShare.fund_code == fund.code,
+            ETFShare.shares.isnot(None),
+        ).order_by(ETFShare.trade_date).all()
+        for i in range(1, len(rows)):
+            if rows[i].change_shares is None and rows[i].shares and rows[i-1].shares:
+                rows[i].change_shares = round(rows[i].shares - rows[i-1].shares, 4)
+    db.commit()
