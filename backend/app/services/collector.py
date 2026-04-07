@@ -10,7 +10,7 @@ from app.models.models import ETFFund, ETFShare, CollectLog
 
 
 def fetch_etf_realtime(codes: list[dict]) -> list[dict]:
-    """腾讯财经接口批量获取ETF实时数据"""
+    """腾讯财经接口批量获取ETF实时数据(含总市值→份额)"""
     query = ",".join(f"{c['market']}{c['code']}" for c in codes)
     url = f"https://qt.gtimg.cn/q={query}"
     resp = requests.get(url, timeout=15)
@@ -36,8 +36,43 @@ def fetch_etf_realtime(codes: list[dict]) -> list[dict]:
     return results
 
 
+def fetch_sse_shares() -> dict:
+    """从AKShare获取上交所ETF当日份额(份)"""
+    try:
+        import akshare as ak
+        df = ak.fund_etf_scale_sse()
+        result = {}
+        for _, row in df.iterrows():
+            code = str(row["基金代码"]).strip()
+            shares = float(row["基金份额"]) / 1e8  # 份→亿份
+            result[code] = shares
+        return result
+    except Exception:
+        return {}
+
+
+def fetch_szse_shares() -> dict:
+    """从AKShare获取深交所ETF当日份额(份)"""
+    try:
+        import akshare as ak
+        df = ak.fund_scale_daily_szse()
+        result = {}
+        for _, row in df.iterrows():
+            code = str(row["基金代码"]).strip()
+            shares = float(row["基金份额"]) / 1e8  # 份→亿份
+            result[code] = shares
+        return result
+    except Exception:
+        return {}
+
+
 def collect_today(db: Session = None) -> dict:
-    """采集当天全部活跃ETF数据并写入DB"""
+    """
+    采集当天全部活跃ETF数据:
+    1. 腾讯接口获取价格和市值
+    2. 上交所/深交所接口获取精确份额
+    3. 如果交易所份额获取失败，用市值/价格计算
+    """
     own_session = db is None
     if own_session:
         db = SessionLocal()
@@ -46,39 +81,57 @@ def collect_today(db: Session = None) -> dict:
         if not funds:
             return {"status": "skipped", "message": "无活跃ETF"}
 
+        # 1. 腾讯获取价格和市值
         codes = [{"code": f.code, "market": f.market} for f in funds]
-        data = fetch_etf_realtime(codes)
+        realtime = fetch_etf_realtime(codes)
+        realtime_map = {item["code"]: item for item in realtime}
+
+        # 2. 交易所获取精确份额
+        sse_shares = fetch_sse_shares()
+        szse_shares = fetch_szse_shares()
+        exchange_shares = {**sse_shares, **szse_shares}
+
         today = date.today()
         count = 0
 
-        for item in data:
+        for fund in funds:
+            item = realtime_map.get(fund.code)
+            if not item:
+                continue
+
+            # 优先用交易所份额，否则用市值/价格
+            shares = exchange_shares.get(fund.code, item["shares"])
+            mcap = round(shares * item["price"], 2) if shares and item["price"] else item["total_market_cap"]
+
             prev = db.query(ETFShare).filter(
-                ETFShare.fund_code == item["code"],
+                ETFShare.fund_code == fund.code,
                 ETFShare.trade_date < today
             ).order_by(ETFShare.trade_date.desc()).first()
-            change = round(item["shares"] - prev.shares, 4) if prev and prev.shares else None
+            change = round(shares - prev.shares, 4) if prev and prev.shares and shares else None
+
+            source = "exchange" if fund.code in exchange_shares else "tencent"
 
             existing = db.query(ETFShare).filter(
-                ETFShare.fund_code == item["code"],
+                ETFShare.fund_code == fund.code,
                 ETFShare.trade_date == today
             ).first()
             if existing:
                 existing.price = item["price"]
-                existing.total_market_cap = item["total_market_cap"]
-                existing.shares = item["shares"]
+                existing.total_market_cap = mcap
+                existing.shares = shares
                 existing.change_shares = change
-                existing.source = "tencent"
+                existing.source = source
                 existing.created_at = datetime.now()
             else:
                 db.add(ETFShare(
-                    fund_code=item["code"], trade_date=today,
-                    price=item["price"], total_market_cap=item["total_market_cap"],
-                    shares=item["shares"], change_shares=change, source="tencent",
+                    fund_code=fund.code, trade_date=today,
+                    price=item["price"], total_market_cap=mcap,
+                    shares=shares, change_shares=change, source=source,
                 ))
             count += 1
 
         log = CollectLog(trade_date=today, status="success", fund_count=count,
-                         message=f"采集 {count} 只ETF")
+                         message=f"采集 {count} 只ETF (交易所份额: {len(exchange_shares)} 只)")
         db.add(log)
         db.commit()
         return {"status": "success", "fund_count": count, "trade_date": str(today)}
@@ -96,10 +149,9 @@ def collect_today(db: Session = None) -> dict:
 def backfill_history(days: int = 365):
     """
     回补历史数据:
-    1. 从东方财富获取季度精确份额
+    1. 从东方财富获取季度精确份额(用于插值)
     2. 从新浪获取每日价格
-    3. 用季度份额线性插值得到每日近似份额
-    4. 每日市值 = 每日份额 * 每日价格
+    3. 线性插值得到每日近似份额
     """
     db = SessionLocal()
     try:
@@ -114,19 +166,16 @@ def backfill_history(days: int = 365):
 
         for fund in funds:
             try:
-                # 1. 获取季度份额
                 quarterly = _fetch_quarterly_shares(fund.code)
                 if not quarterly:
                     print(f"[backfill] {fund.code} 无季度份额数据，跳过")
                     continue
 
-                # 2. 获取每日价格
                 daily_prices = _fetch_sina_kline(fund.code, fund.market, days)
                 if not daily_prices:
                     print(f"[backfill] {fund.code} 无历史价格，跳过")
                     continue
 
-                # 3. 插值计算每日份额
                 records = []
                 for dp in daily_prices:
                     trade_dt = date.fromisoformat(dp["day"])
@@ -135,13 +184,10 @@ def backfill_history(days: int = 365):
                     mcap = round(shares * price, 2) if shares else None
 
                     records.append(ETFShare(
-                        fund_code=fund.code,
-                        trade_date=trade_dt,
-                        price=price,
-                        total_market_cap=mcap,
+                        fund_code=fund.code, trade_date=trade_dt,
+                        price=price, total_market_cap=mcap,
                         shares=round(shares, 4) if shares else None,
-                        change_shares=None,
-                        source="backfill",
+                        change_shares=None, source="backfill",
                     ))
 
                 for r in records:
@@ -176,7 +222,6 @@ def _fetch_quarterly_shares(fund_code: str) -> list[dict]:
     tds = re.findall(r'<td[^>]*>(.*?)</td>', resp.text)
     clean = [re.sub(r'<[^>]+>', '', c).strip() for c in tds]
 
-    # 6列: 日期, 申购, 赎回, 期末总份额, 期末净资产, 净资产变动率
     result = []
     for i in range(0, len(clean), 6):
         row = clean[i:i+6]
@@ -192,33 +237,27 @@ def _fetch_quarterly_shares(fund_code: str) -> list[dict]:
 
 
 def _interpolate_shares(target_date: date, quarterly: list[dict]) -> float:
-    """用季度份额数据线性插值得到某天的近似份额"""
+    """用季度份额数据线性插值"""
     if not quarterly:
         return 0
-
-    # 如果在最早季度之前，用最早的
     if target_date <= quarterly[0]["date"]:
         return quarterly[0]["shares"]
-    # 如果在最晚季度之后，用最晚的
     if target_date >= quarterly[-1]["date"]:
         return quarterly[-1]["shares"]
 
-    # 找到前后两个季度
     for i in range(len(quarterly) - 1):
-        q1 = quarterly[i]
-        q2 = quarterly[i + 1]
+        q1, q2 = quarterly[i], quarterly[i + 1]
         if q1["date"] <= target_date <= q2["date"]:
             total_days = (q2["date"] - q1["date"]).days
             elapsed = (target_date - q1["date"]).days
             if total_days == 0:
                 return q1["shares"]
-            ratio = elapsed / total_days
-            return q1["shares"] + (q2["shares"] - q1["shares"]) * ratio
+            return q1["shares"] + (q2["shares"] - q1["shares"]) * elapsed / total_days
 
     return quarterly[-1]["shares"]
 
 
-def _fetch_sina_kline(code: str, market: str, datalen: int = 90) -> list[dict]:
+def _fetch_sina_kline(code: str, market: str, datalen: int = 365) -> list[dict]:
     """新浪财经历史日K线"""
     symbol = f"{market}{code}"
     url = (
