@@ -93,7 +93,7 @@ def collect_today(db: Session = None) -> dict:
             db.close()
 
 
-def backfill_history(days: int = 90):
+def backfill_history(days: int = 365):
     """
     回补历史数据:
     1. 从东方财富获取季度精确份额
