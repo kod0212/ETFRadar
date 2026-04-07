@@ -5,6 +5,7 @@ dist/
 build/
 .env
 *.db
+!backend/data/seed.db
 *.sqlite3
 venv/
 .venv/
