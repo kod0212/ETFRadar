@@ -1,18 +1,25 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
-from app.core.database import init_db
-from app.core.init_data import init_seed_data
 from app.core.config import DATA_DIR
 from app.api.v1 import funds, shares, collect
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    need_backfill = not (DATA_DIR / "etf.db").exists()
-    init_db()
+    from app.core.init_data import init_seed_data
+    from app.core.database import init_db
+
+    main_db = DATA_DIR / "etf.db"
+    seed_db = DATA_DIR / "seed.db"
+    had_db = main_db.exists()
+
+    # 先尝试从seed恢复，再建表
     init_seed_data()
-    if need_backfill and not (DATA_DIR / "seed.db").exists():
+    init_db()
+
+    # 只有既没有旧库也没有seed时才回补
+    if not had_db and not seed_db.exists():
         from app.services.collector import backfill_history
         backfill_history()
     yield
