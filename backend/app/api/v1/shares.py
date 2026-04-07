@@ -61,7 +61,7 @@ def shares_summary(
     db: Session = Depends(get_db),
 ):
     if not start:
-        start = date.today() - timedelta(days=90)
+        start = date.today() - timedelta(days=365)
     if not end:
         end = date.today()
 
@@ -93,7 +93,7 @@ def shares_trend(
     db: Session = Depends(get_db),
 ):
     if not start:
-        start = date.today() - timedelta(days=90)
+        start = date.today() - timedelta(days=365)
     if not end:
         end = date.today()
 
