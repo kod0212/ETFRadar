@@ -159,13 +159,18 @@ def backfill_history():
                     continue
 
                 # 构建该ETF的份额时间序列(采样点)
+                # 上交所ETF: 用上交所每周精确份额
+                # 深交所ETF: 用东方财富季度份额
                 share_points = []
-                for dt_str, shares_map in sorted(sse_history.items()):
-                    if fund.code in shares_map:
-                        share_points.append({
-                            "date": date(int(dt_str[:4]), int(dt_str[4:6]), int(dt_str[6:])),
-                            "shares": shares_map[fund.code],
-                        })
+                if fund.market == "sh":
+                    for dt_str, shares_map in sorted(sse_history.items()):
+                        if fund.code in shares_map:
+                            share_points.append({
+                                "date": date(int(dt_str[:4]), int(dt_str[4:6]), int(dt_str[6:])),
+                                "shares": shares_map[fund.code],
+                            })
+                else:
+                    share_points = _fetch_quarterly_shares(fund.code)
 
                 if not share_points:
                     print(f"[backfill] {fund.code} 无份额数据，跳过")
@@ -233,6 +238,27 @@ def _interpolate(target: date, points: list[dict]) -> float:
                 return p1["shares"]
             return p1["shares"] + (p2["shares"] - p1["shares"]) * elapsed / total
     return points[-1]["shares"]
+
+
+def _fetch_quarterly_shares(fund_code: str) -> list[dict]:
+    """从东方财富获取季度份额数据(深交所ETF兜底用)"""
+    url = f"https://fundf10.eastmoney.com/FundArchivesDatas.aspx?type=gmbd&mode=0&code={fund_code}"
+    headers = {"User-Agent": "Mozilla/5.0", "Referer": f"https://fundf10.eastmoney.com/gmbd_{fund_code}.html"}
+    resp = requests.get(url, headers=headers, timeout=15)
+    tds = re.findall(r'<td[^>]*>(.*?)</td>', resp.text)
+    clean = [re.sub(r'<[^>]+>', '', c).strip() for c in tds]
+    result = []
+    for i in range(0, len(clean), 6):
+        row = clean[i:i+6]
+        if len(row) >= 4:
+            try:
+                dt = date.fromisoformat(row[0])
+                shares = float(row[3].replace(',', ''))
+                result.append({"date": dt, "shares": shares})
+            except (ValueError, IndexError):
+                continue
+    result.sort(key=lambda x: x["date"])
+    return result
 
 
 def _fetch_sina_kline(code: str, market: str, datalen: int = 365) -> list[dict]:
