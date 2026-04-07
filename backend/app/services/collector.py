@@ -116,11 +116,7 @@ def backfill_history(days: int = 90):
         realtime = fetch_etf_realtime(codes)
         baseline = {item["code"]: item for item in realtime}
 
-        # 2. 用AKShare回补历史价格
-        import akshare as ak
-        end = date.today().strftime("%Y%m%d")
-        start = (date.today() - timedelta(days=days)).strftime("%Y%m%d")
-
+        # 2. 用新浪财经回补历史价格 (不限流)
         for fund in funds:
             base = baseline.get(fund.code)
             if not base or base["price"] <= 0:
@@ -128,27 +124,22 @@ def backfill_history(days: int = 90):
                 continue
 
             try:
-                df = ak.fund_etf_hist_em(
-                    symbol=fund.code, period="daily",
-                    start_date=start, end_date=end, adjust=""
-                )
-                if df.empty:
+                hist = _fetch_sina_kline(fund.code, fund.market, days)
+                if not hist:
                     continue
 
                 records = []
                 base_price = base["price"]
-                base_shares = base["shares"]
                 base_mcap = base["total_market_cap"]
 
-                for _, row in df.iterrows():
-                    hist_price = float(row["收盘"])
-                    # 近似: 份额短期稳定, 市值随价格变化
+                for item in hist:
+                    hist_price = item["close"]
                     est_mcap = round(base_mcap * hist_price / base_price, 2)
                     est_shares = round(est_mcap / hist_price, 4) if hist_price > 0 else None
 
                     records.append(ETFShare(
                         fund_code=fund.code,
-                        trade_date=row["日期"],
+                        trade_date=item["day"],
                         price=hist_price,
                         total_market_cap=est_mcap,
                         shares=est_shares,
@@ -191,3 +182,20 @@ def _calc_change_shares(db: Session):
             if rows[i].change_shares is None and rows[i].shares and rows[i-1].shares:
                 rows[i].change_shares = round(rows[i].shares - rows[i-1].shares, 4)
     db.commit()
+
+
+def _fetch_sina_kline(code: str, market: str, datalen: int = 90) -> list[dict]:
+    """新浪财经历史日K线"""
+    import json, re
+    symbol = f"{market}{code}"
+    url = (
+        f"https://quotes.sina.cn/cn/api/jsonp_v2.php/=/"
+        f"CN_MarketDataService.getKLineData?symbol={symbol}"
+        f"&scale=240&ma=no&datalen={datalen}"
+    )
+    resp = requests.get(url, timeout=15)
+    match = re.search(r'=\((.*)\)', resp.text, re.DOTALL)
+    if not match:
+        return []
+    data = json.loads(match.group(1))
+    return [{"day": d["day"], "close": float(d["close"])} for d in data]
