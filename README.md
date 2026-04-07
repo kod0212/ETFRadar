@@ -101,9 +101,8 @@ ETFRadar/
 
 ## 相关文档
 
+- [产品需求文档 (PRD)](docs/prd.md)
 - [架构设计](docs/architecture.md)
-- [需求文档 (飞书)](https://www.feishu.cn/docx/DpvLdnNnjoxCrSxVROAcQutqnTh)
-- [开发计划 (飞书)](https://www.feishu.cn/docx/BPDEdR2OyoAJOaxKaMbcjQG4nhb)
 
 ## License
 
