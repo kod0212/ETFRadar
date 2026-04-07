@@ -119,6 +119,113 @@ def collect_today(db: Session = None) -> dict:
             db.close()
 
 
+def incremental_update(db: Session) -> dict:
+    """
+    增量更新: 检查数据库最新日期, 补上缺失的天数
+    - 上交所: fetch_sse_shares_by_date 逐日补
+    - 深交所: szse.cn API 按日期范围补
+    - 价格: 腾讯实时接口
+    """
+    from sqlalchemy import func as sqlfunc
+
+    max_date = db.query(sqlfunc.max(ETFShare.trade_date)).scalar()
+    today = date.today()
+
+    if max_date and str(max_date) >= str(today):
+        return {"status": "up_to_date", "message": f"数据已是最新 ({max_date})"}
+
+    if not max_date:
+        return collect_today(db)
+
+    # 需要补的日期范围
+    start = max_date + timedelta(days=1)
+    print(f"[update] 增量更新: {start} → {today}")
+
+    # 1. 获取已追踪ETF的实时价格
+    funds = db.query(ETFFund).filter(ETFFund.is_active == True).all()
+    codes = [{"code": f.code, "market": f.market} for f in funds]
+    realtime = {item["code"]: item for item in fetch_etf_realtime(codes)}
+
+    # 2. 逐日补上交所份额(全部ETF)
+    total_count = 0
+    d = start
+    while d <= today:
+        dt_str = d.strftime("%Y%m%d")
+        sse_data = fetch_sse_shares_by_date(dt_str)
+        if sse_data:
+            for code, shares in sse_data.items():
+                price = realtime.get(code, {}).get("price") if d == today else None
+                mcap = round(shares * price, 2) if price else None
+                if not db.query(ETFShare).filter(ETFShare.fund_code == code, ETFShare.trade_date == d).first():
+                    db.add(ETFShare(fund_code=code, trade_date=d, price=price,
+                                    total_market_cap=mcap, shares=round(shares, 4), source="sse_daily"))
+                    total_count += 1
+            print(f"  [update] {dt_str}: 上交所 {len(sse_data)} 只")
+        time.sleep(0.3)
+        d += timedelta(days=1)
+
+    # 3. 补深交所份额(全部ETF, 按日期范围一次查)
+    szse_records = _fetch_szse_range(start.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"))
+    for code, dt_date, shares in szse_records:
+        if not db.query(ETFShare).filter(ETFShare.fund_code == code, ETFShare.trade_date == dt_date).first():
+            price = realtime.get(code, {}).get("price") if dt_date == today else None
+            mcap = round(shares * price, 2) if price else None
+            db.add(ETFShare(fund_code=code, trade_date=dt_date, price=price,
+                            total_market_cap=mcap, shares=round(shares, 4), source="szse_api"))
+            total_count += 1
+    if szse_records:
+        print(f"  [update] 深交所: {len(szse_records)} 条")
+
+    # 4. 补已追踪ETF的价格和change_shares
+    for fund in funds:
+        rt = realtime.get(fund.code)
+        if rt and rt["price"]:
+            row = db.query(ETFShare).filter(ETFShare.fund_code == fund.code, ETFShare.trade_date == today).first()
+            if row and not row.price:
+                row.price = rt["price"]
+                row.total_market_cap = round(row.shares * rt["price"], 2) if row.shares else None
+
+    _calc_change_shares(db)
+    db.add(CollectLog(trade_date=today, status="success", fund_count=total_count,
+                      message=f"增量更新 {start}→{today}, {total_count} 条"))
+    db.commit()
+    return {"status": "success", "updated": total_count, "range": f"{start} → {today}"}
+
+
+def _fetch_szse_range(start: str, end: str) -> list:
+    """深交所API按日期范围获取全部ETF份额, 返回 [(code, date, shares_yi), ...]"""
+    result = []
+    page = 1
+    while True:
+        params = {
+            "SHOWTYPE": "JSON", "CATALOGID": "scsj_fund_jjgm", "jjlb": "ETF",
+            "txtStart": start, "txtEnd": end, "PAGENO": page, "PAGESIZE": 200,
+        }
+        try:
+            resp = requests.get("https://www.szse.cn/api/report/ShowReport/data",
+                                params=params, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.szse.cn/"},
+                                timeout=15)
+            tab = resp.json()[0]
+            records = tab.get("data", [])
+            if not records:
+                break
+            for r in records:
+                try:
+                    dt = date.fromisoformat(r["size_date"])
+                    code = r["fund_code"].strip()
+                    shares = float(r["current_size"].replace(",", "")) / 10000
+                    result.append((code, dt, shares))
+                except (ValueError, KeyError):
+                    continue
+            total = tab.get("metadata", {}).get("recordcount", 0)
+            if len(result) >= total:
+                break
+            page += 1
+        except Exception:
+            break
+    return result
+
+
 def backfill_history():
     """
     回补历史数据: 上交所每周精确份额 + 新浪每日价格

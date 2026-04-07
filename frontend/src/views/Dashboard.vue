@@ -54,7 +54,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import * as echarts from 'echarts'
-import { getLatestShares, getSharesTrend, getCollectStatus } from '../api'
+import { getLatestShares, getSharesTrend, getCollectStatus, triggerCollect } from '../api'
 
 const latestData = ref<any[]>([])
 const trendData = ref<any[]>([])
@@ -104,10 +104,17 @@ const loadTrend = async () => {
 
 onMounted(async () => {
   try {
-    const [latestRes, statusRes] = await Promise.all([getLatestShares(), getCollectStatus()])
+    // 先检查是否需要增量更新
+    const statusRes = await getCollectStatus()
+    const status = statusRes.data.data
+    if (!status.is_up_to_date) {
+      console.log(`数据不是最新(${status.latest_date}), 自动更新...`)
+      await triggerCollect()
+    }
+    // 加载数据
+    const latestRes = await getLatestShares()
     latestData.value = latestRes.data.data || []
-    const logs = statusRes.data.data || []
-    if (logs.length > 0) lastCollectTime.value = logs[0].created_at
+    lastCollectTime.value = status.latest_date || '-'
   } catch { /* empty */ }
   await loadTrend()
 })

@@ -7,21 +7,10 @@ from app.api.v1 import funds, shares, collect
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from app.core.init_data import init_seed_data
     from app.core.database import init_db
-
-    main_db = DATA_DIR / "etf.db"
-    seed_db = DATA_DIR / "seed.db"
-    had_db = main_db.exists()
-
-    # 先尝试从seed恢复，再建表
+    from app.core.init_data import init_seed_data
     init_seed_data()
     init_db()
-
-    # 只有既没有旧库也没有seed时才回补
-    if not had_db and not seed_db.exists():
-        from app.services.collector import backfill_history
-        backfill_history()
     yield
 
 
