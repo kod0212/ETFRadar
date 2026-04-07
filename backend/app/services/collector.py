@@ -160,7 +160,7 @@ def backfill_history():
 
                 # 构建该ETF的份额时间序列(采样点)
                 # 上交所ETF: 用上交所每周精确份额
-                # 深交所ETF: 用东方财富季度份额
+                # 深交所ETF: 用深交所每日精确份额
                 share_points = []
                 if fund.market == "sh":
                     for dt_str, shares_map in sorted(sse_history.items()):
@@ -170,7 +170,7 @@ def backfill_history():
                                 "shares": shares_map[fund.code],
                             })
                 else:
-                    share_points = _fetch_quarterly_shares(fund.code)
+                    share_points = _fetch_szse_history(fund.code)
 
                 if not share_points:
                     print(f"[backfill] {fund.code} 无份额数据，跳过")
@@ -238,6 +238,43 @@ def _interpolate(target: date, points: list[dict]) -> float:
                 return p1["shares"]
             return p1["shares"] + (p2["shares"] - p1["shares"]) * elapsed / total
     return points[-1]["shares"]
+
+
+def _fetch_szse_history(fund_code: str) -> list[dict]:
+    """从深交所获取每日精确份额(最多1年, 分两次6个月查询)"""
+    from datetime import date, timedelta
+    today = date.today()
+    mid = today - timedelta(days=183)
+    all_records = []
+    for start, end in [(mid.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d")),
+                       ((today - timedelta(days=365)).strftime("%Y-%m-%d"), (mid - timedelta(days=1)).strftime("%Y-%m-%d"))]:
+        page = 1
+        while True:
+            params = {
+                "SHOWTYPE": "JSON", "CATALOGID": "scsj_fund_jjgm", "jjlb": "ETF",
+                "txtDm": fund_code, "txtStart": start, "txtEnd": end,
+                "PAGENO": page, "PAGESIZE": 200,
+            }
+            resp = requests.get("https://www.szse.cn/api/report/ShowReport/data",
+                                params=params, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.szse.cn/"}, timeout=15)
+            tab = resp.json()[0]
+            records = tab.get("data", [])
+            if not records:
+                break
+            all_records.extend(records)
+            if len(all_records) >= tab.get("metadata", {}).get("recordcount", 0):
+                break
+            page += 1
+    result = []
+    for r in all_records:
+        try:
+            dt = date.fromisoformat(r["size_date"])
+            shares = float(r["current_size"].replace(",", "")) / 10000  # 万份→亿份
+            result.append({"date": dt, "shares": shares})
+        except (ValueError, KeyError):
+            continue
+    result.sort(key=lambda x: x["date"])
+    return result
 
 
 def _fetch_quarterly_shares(fund_code: str) -> list[dict]:
