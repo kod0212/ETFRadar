@@ -103,6 +103,7 @@ ETFRadar/
 
 - [产品需求文档 (PRD)](docs/prd.md)
 - [架构设计](docs/architecture.md)
+- [Docker 部署指南](docs/docker-deploy.md)
 
 ## License
 
