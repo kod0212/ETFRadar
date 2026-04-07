@@ -1,4 +1,5 @@
 """首次启动初始化"""
+import gzip
 import shutil
 from pathlib import Path
 from sqlalchemy.orm import Session
@@ -6,18 +7,17 @@ from app.core.database import SessionLocal
 from app.core.config import DEFAULT_ETFS, DATA_DIR
 from app.models.models import ETFFund
 
-SEED_DB = DATA_DIR / "seed.db"
+SEED_GZ = DATA_DIR / "seed.db.gz"
 MAIN_DB = DATA_DIR / "etf.db"
 
 
 def init_seed_data():
-    # 如果主数据库不存在但种子数据库存在，直接复制
-    if not MAIN_DB.exists() and SEED_DB.exists():
-        shutil.copy2(SEED_DB, MAIN_DB)
-        print(f"[init] 从 seed.db 恢复预置数据")
+    if not MAIN_DB.exists() and SEED_GZ.exists():
+        with gzip.open(SEED_GZ, "rb") as f_in, open(MAIN_DB, "wb") as f_out:
+            shutil.copyfileobj(f_in, f_out)
+        print(f"[init] 从 seed.db.gz 恢复预置数据")
         return
 
-    # 否则检查是否需要写入默认ETF
     db: Session = SessionLocal()
     try:
         count = db.query(ETFFund).count()
