@@ -1,1 +1,10 @@
-"""API 依赖注入 (DB session 等)"""
+"""API 依赖注入"""
+from app.core.database import SessionLocal
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
