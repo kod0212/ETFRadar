@@ -1,67 +1,110 @@
-# ETF雷达
+# 📡 ETF雷达
 
-自动追踪A股ETF基金份额变化的Web应用，帮助投资者直观感知大资金动态。
+自动追踪A股ETF基金份额变化的Web应用，帮助投资者直观感知大资金（如国家队）的动态。
 
 ## 功能
 
-- 每日自动采集指定ETF的份额/规模数据（增量更新）
-- 同类ETF份额汇总趋势图
-- ETF管理（添加/删除/分组）
-- 数据表格 + ECharts图表可视化
+- 📊 **份额趋势图** — 按分组查看ETF份额/市值变化趋势
+- 📋 **最新数据表格** — 所有追踪ETF的最新份额、市值、变化量
+- 🔍 **ETF详情** — 单只ETF历史趋势 + 数据表格
+- ⚙️ **ETF管理** — 添加/删除/分组，新增ETF自动有历史数据
+- 🔄 **自动更新** — 打开页面自动补上缺失天数，无需手动操作
 
-## 技术栈
+## 数据来源
 
-- **后端**: Python + FastAPI + SQLite + APScheduler
-- **前端**: Vue 3 + ECharts + Ant Design Vue
-- **数据源**: 腾讯财经(主) + AKShare(辅) + 东方财富(校准)
-
-## 项目结构
-
-```
-ETFProject/
-├── backend/
-│   ├── app/
-│   │   ├── api/           # API路由 (RESTful, 兼容Web+小程序)
-│   │   │   ├── v1/        # API v1 版本
-│   │   │   │   ├── funds.py    # ETF管理
-│   │   │   │   ├── shares.py   # 份额数据查询
-│   │   │   │   └── collect.py  # 采集控制
-│   │   │   └── deps.py    # 依赖注入(DB session等)
-│   │   ├── core/
-│   │   │   ├── config.py  # 配置管理
-│   │   │   ├── database.py # SQLite连接
-│   │   │   └── scheduler.py # 定时任务
-│   │   ├── models/        # SQLAlchemy ORM模型
-│   │   ├── schemas/       # Pydantic请求/响应模型
-│   │   ├── services/      # 业务逻辑
-│   │   │   ├── collector.py  # 数据采集服务
-│   │   │   └── analyzer.py   # 数据分析服务
-│   │   └── main.py
-│   ├── data/              # SQLite数据库文件
-│   ├── scripts/           # 工具脚本
-│   └── requirements.txt
-├── frontend/              # Web前端 (Vue 3)
-└── docs/                  # 文档
-```
+| 数据 | 来源 | 精度 |
+|------|------|------|
+| 上交所ETF每日份额 | 上交所官网 (sse.com.cn) | 每日精确 |
+| 深交所ETF每日份额 | 深交所官网 (szse.cn) | 每日精确 |
+| ETF实时价格/市值 | 腾讯财经 | 实时 |
+| 预置历史数据 | 上交所+深交所 | 1461只ETF, 约1年 |
 
 ## 快速开始
 
+### 方式一：Docker（推荐）
+
 ```bash
-# 后端
+git clone https://github.com/kod0212/ETFRadar.git
+cd ETFRadar
+docker-compose up
+```
+
+打开 http://localhost:5173
+
+### 方式二：本地开发
+
+**后端**（终端1）：
+```bash
 cd backend
 pip install -r requirements.txt
 python -m app.main
+```
 
-# 前端
+**前端**（终端2）：
+```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-## 架构设计
+打开 http://localhost:5173
 
-详见 [docs/architecture.md](docs/architecture.md)
+## 技术栈
 
-## 需求文档
+- **后端**: Python + FastAPI + SQLAlchemy + SQLite
+- **前端**: Vue 3 + TypeScript + Ant Design Vue + ECharts
+- **数据源**: 上交所/深交所官方接口 + 腾讯财经
 
-[ETF雷达 PRD](https://www.feishu.cn/docx/DpvLdnNnjoxCrSxVROAcQutqnTh)
+## 项目结构
+
+```
+ETFRadar/
+├── backend/
+│   ├── app/
+│   │   ├── api/v1/        # RESTful API (funds/shares/collect)
+│   │   ├── core/          # 配置、数据库、初始化
+│   │   ├── models/        # SQLAlchemy ORM
+│   │   ├── schemas/       # Pydantic 模型
+│   │   └── services/      # 数据采集服务
+│   ├── data/
+│   │   └── seed.db.gz     # 预置数据 (1461只ETF, ~43万条)
+│   └── scripts/           # 数据回补脚本
+├── frontend/
+│   └── src/
+│       ├── views/         # 仪表盘/管理/详情页
+│       ├── api.ts         # API 封装
+│       └── router.ts      # 路由
+├── docker-compose.yml     # 一键部署
+└── docs/
+    └── architecture.md    # 架构设计文档
+```
+
+## API 文档
+
+启动后端后访问 http://localhost:8000/api/docs 查看 Swagger UI。
+
+主要接口：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | /api/v1/funds | ETF列表 |
+| POST | /api/v1/funds | 添加ETF |
+| GET | /api/v1/shares/latest | 最新份额 |
+| GET | /api/v1/shares/trend | 趋势数据 |
+| POST | /api/v1/collect/trigger | 触发增量更新 |
+
+## 数据更新机制
+
+- **预置数据**: 首次启动从 `seed.db.gz` 恢复，包含约1年历史
+- **增量更新**: 打开页面时自动检查，补上数据库最新日期到今天的缺失数据
+- **数据源**: 上交所/深交所官方接口，每日精确份额
+
+## 相关文档
+
+- [架构设计](docs/architecture.md)
+- [需求文档 (飞书)](https://www.feishu.cn/docx/DpvLdnNnjoxCrSxVROAcQutqnTh)
+- [开发计划 (飞书)](https://www.feishu.cn/docx/BPDEdR2OyoAJOaxKaMbcjQG4nhb)
+
+## License
+
+MIT
