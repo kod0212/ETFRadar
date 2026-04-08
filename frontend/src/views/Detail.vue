@@ -9,7 +9,7 @@
           <a-radio-button value="shares">份额</a-radio-button>
         </a-radio-group>
       </template>
-      <div ref="chartRef" style="height: 360px"></div>
+      <div ref="chartRef" style="width: 100%; height: 360px"></div>
     </a-card>
 
     <a-card title="历史数据" size="small">
@@ -77,7 +77,7 @@ const loadTrend = async () => {
   renderChart()
 }
 
-const onResize = () => chart?.resize()
+const onResize = () => setTimeout(() => chart?.resize(), 200)
 
 onMounted(async () => {
   window.addEventListener('resize', onResize)

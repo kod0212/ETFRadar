@@ -34,7 +34,7 @@
           </a-radio-group>
         </a-space>
       </template>
-      <div ref="chartRef" style="height: 360px"></div>
+      <div ref="chartRef" style="width: 100%; height: 360px"></div>
     </a-card>
 
     <!-- 最新数据表格 -->
@@ -89,7 +89,7 @@ const columns = [
 
 const metricLabel = computed(() => metric.value === 'market_cap' ? '总市值(亿元)' : '份额(亿份)')
 
-const onResize = () => chart?.resize()
+const onResize = () => setTimeout(() => chart?.resize(), 200)
 
 const renderChart = () => {
   if (!chartRef.value) return
