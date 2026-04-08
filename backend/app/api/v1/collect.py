@@ -15,8 +15,9 @@ router = APIRouter(prefix="/collect", tags=["采集控制"])
 
 
 @router.post("/trigger", response_model=ApiResponse)
-def trigger_collect(db: Session = Depends(get_db)):
-    result = incremental_update(db)
+def trigger_collect(force: bool = False, db: Session = Depends(get_db)):
+    """触发增量更新。force=true 跳过冷却（手动触发用）"""
+    result = incremental_update(db, force=force)
     return ApiResponse(data=result)
 
 

@@ -18,5 +18,5 @@ export const getSharesSummary = (params: any) => api.get('/shares/summary', { pa
 export const getSharesTrend = (params: any) => api.get('/shares/trend', { params })
 
 // 采集
-export const triggerCollect = () => api.post('/collect/trigger')
+export const triggerCollect = (force = false) => api.post(`/collect/trigger?force=${force}`)
 export const getCollectStatus = () => api.get('/collect/status')

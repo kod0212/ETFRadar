@@ -127,14 +127,6 @@ const pollStatus = async () => {
   } catch { /* empty */ }
 }
 
-const COOLDOWN = 6 * 60 * 60 * 1000
-
-const shouldAutoUpdate = (isUpToDate: boolean): boolean => {
-  if (isUpToDate) return false
-  const lastAuto = Number(localStorage.getItem('etf_last_auto_update') || '0')
-  return Date.now() - lastAuto > COOLDOWN
-}
-
 onMounted(async () => {
   window.addEventListener('resize', onResize)
 
@@ -144,12 +136,15 @@ onMounted(async () => {
     const status = statusRes.data.data
     lastCollectTime.value = status?.latest_date || '-'
 
-    // 只在需要时触发自动更新
-    if (shouldAutoUpdate(status?.is_up_to_date)) {
-      localStorage.setItem('etf_last_auto_update', String(Date.now()))
-      updateStatus.value = { running: true, step: '准备更新...', progress: '' }
-      triggerCollect().catch(() => {})
-      pollTimer = setInterval(pollStatus, 2000)
+    // 自动更新（后端控制6小时冷却）
+    if (status && !status.is_up_to_date) {
+      triggerCollect(false).then(res => {
+        const d = res.data.data
+        if (d.status === 'cooldown' || d.status === 'up_to_date') return
+        // 真正开始更新了，轮询状态
+        updateStatus.value = { running: true, step: '准备更新...', progress: '' }
+        pollTimer = setInterval(pollStatus, 2000)
+      }).catch(() => {})
     }
   } catch { /* empty */ }
   await loadTrend()

@@ -64,7 +64,7 @@ onMounted(async () => {
 const onCollect = async () => {
   collecting.value = true
   try {
-    const res = await triggerCollect()
+    const res = await triggerCollect(true)
     const d = res.data.data
     message.success(`采集完成: ${d.updated || d.fund_count || 0} 条数据`)
   } catch {

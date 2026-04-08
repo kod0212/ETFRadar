@@ -123,15 +123,29 @@ def collect_today(db: Session = None) -> dict:
 
 
 def get_update_status() -> dict:
-    return dict(_update_status)
+    return {**_update_status, "last_update_time": _last_update_time}
 
 
-def incremental_update(db: Session) -> dict:
+def incremental_update(db: Session, force: bool = False) -> dict:
     """增量更新: 检查DB最新日期, 补上缺失的天数"""
+    global _last_update_time
+
+    # 冷却检查（force=True 跳过，手动触发用）
+    if not force:
+        import time as _time
+        elapsed = _time.time() - _last_update_time
+        if elapsed < UPDATE_COOLDOWN:
+            remaining = int((UPDATE_COOLDOWN - elapsed) / 60)
+            return {"status": "cooldown", "message": f"距上次更新不足6小时，{remaining}分钟后可自动更新"}
+
     if not _update_lock.acquire(blocking=False):
         return {"status": "busy", "message": "更新正在进行中"}
     try:
-        return _do_incremental_update(db)
+        result = _do_incremental_update(db)
+        if result.get("status") == "success":
+            import time as _time
+            _last_update_time = _time.time()
+        return result
     finally:
         _update_lock.release()
 
@@ -489,6 +503,8 @@ def _calc_change_shares(db: Session):
 import threading
 _update_lock = threading.Lock()
 _update_status = {"running": False, "step": "", "progress": ""}
+_last_update_time = 0  # 上次更新的时间戳
+UPDATE_COOLDOWN = 6 * 3600  # 6小时冷却
 
 
 def _upsert_share(db: Session, code: str, trade_date, price, mcap, shares, source: str):
