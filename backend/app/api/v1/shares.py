@@ -108,16 +108,24 @@ def shares_trend(
         ).order_by(ETFShare.trade_date).all()
         data = [TrendPoint(trade_date=r[0], value=round(r[1], 2)) for r in rows]
     elif group:
+        # 组内ETF数量
+        group_funds = db.query(ETFFund).filter(ETFFund.group_tag == group).all()
+        group_count = len(group_funds)
+        group_codes = [f.code for f in group_funds]
+
+        # 查每个日期的汇总，只保留组内所有ETF都有数据的日期
         rows = db.query(
             ETFShare.trade_date,
             func.sum(col).label("total"),
-        ).join(ETFFund, ETFShare.fund_code == ETFFund.code).filter(
-            ETFFund.group_tag == group,
+            func.count(ETFShare.fund_code).label("cnt"),
+        ).filter(
+            ETFShare.fund_code.in_(group_codes),
             ETFShare.trade_date >= start,
             ETFShare.trade_date <= end,
             col.isnot(None),
         ).group_by(ETFShare.trade_date).order_by(ETFShare.trade_date).all()
-        data = [TrendPoint(trade_date=r[0], value=round(r[1], 2)) for r in rows]
+        data = [TrendPoint(trade_date=r[0], value=round(r[1], 2))
+                for r in rows if r[2] == group_count]
     else:
         return ApiResponse(code=400, message="需要指定 code 或 group 参数")
 
