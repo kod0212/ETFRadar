@@ -133,10 +133,11 @@ def incremental_update(db: Session) -> dict:
 
 def _do_incremental_update(db: Session) -> dict:
     """
-    增量更新: 检查数据库最新日期, 补上缺失的天数
-    - 上交所: fetch_sse_shares_by_date 逐日补
-    - 深交所: szse.cn API 按日期范围补
-    - 价格: 腾讯实时接口
+    增量更新逻辑（全部ETF份额 + 追踪ETF价格）:
+    1. 上交所: 逐日获取全部ETF份额
+    2. 深交所: 按日期范围获取全部ETF份额
+    3. 追踪ETF: 新浪K线补历史价格 + 腾讯补当天价格
+    4. 补算市值和份额变化
     """
     from sqlalchemy import func as sqlfunc
 
@@ -149,58 +150,68 @@ def _do_incremental_update(db: Session) -> dict:
     if not max_date:
         return collect_today(db)
 
-    # 需要补的日期范围
     start = max_date + timedelta(days=1)
     logger.info(f"[update] 增量更新: {start} → {today}")
 
-    # 1. 获取已追踪ETF的实时价格
-    funds = db.query(ETFFund).filter(ETFFund.is_active == True).all()
-    codes = [{"code": f.code, "market": f.market} for f in funds]
-    realtime = {item["code"]: item for item in fetch_etf_realtime(codes)}
-
-    # 获取已追踪ETF的历史价格(补缺失日期的价格)
-    prices_map = {}  # {code: {date_str: price}}
-    for fund in funds:
-        klines = _fetch_sina_kline(fund.code, fund.market, 30)
-        prices_map[fund.code] = {k["day"]: k["close"] for k in klines}
-
-    # 2. 逐日补上交所份额(全部ETF)
     total_count = 0
+
+    # === 1. 上交所: 逐日获取全部ETF份额(只存份额,不存价格) ===
     d = start
     while d <= today:
         dt_str = d.strftime("%Y%m%d")
         sse_data = fetch_sse_shares_by_date(dt_str)
         if sse_data:
-            dt_iso = d.isoformat()
             for code, shares in sse_data.items():
-                price = prices_map.get(code, {}).get(dt_iso) or (realtime.get(code, {}).get("price") if d == today else None)
-                mcap = round(shares * price, 2) if price else None
-                _upsert_share(db, code, d, price, mcap, shares, "sse_daily")
+                _upsert_share(db, code, d, None, None, shares, "sse_daily")
                 total_count += 1
             logger.info(f"  [update] {dt_str}: 上交所 {len(sse_data)} 只")
         time.sleep(0.3)
         d += timedelta(days=1)
 
-    # 3. 补深交所份额
+    # === 2. 深交所: 按日期范围获取全部ETF份额 ===
     szse_records = _fetch_szse_range(start.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"))
     for code, dt_date, shares in szse_records:
-        dt_iso = dt_date.isoformat()
-        price = prices_map.get(code, {}).get(dt_iso) or (realtime.get(code, {}).get("price") if dt_date == today else None)
-        mcap = round(shares * price, 2) if price else None
-        _upsert_share(db, code, dt_date, price, mcap, shares, "szse_api")
+        _upsert_share(db, code, dt_date, None, None, shares, "szse_api")
         total_count += 1
     if szse_records:
         logger.info(f"  [update] 深交所: {len(szse_records)} 条")
 
-    # 4. 补已追踪ETF的价格
-    for fund in funds:
-        rt = realtime.get(fund.code)
-        if rt and rt["price"]:
-            row = db.query(ETFShare).filter(ETFShare.fund_code == fund.code, ETFShare.trade_date == today).first()
-            if row and not row.price:
+    db.commit()
+
+    # === 3. 追踪ETF: 补价格和市值 ===
+    funds = db.query(ETFFund).filter(ETFFund.is_active == True).all()
+    if funds:
+        # 新浪K线补历史价格(缺失的日期)
+        for fund in funds:
+            klines = _fetch_sina_kline(fund.code, fund.market, 30)
+            price_map = {k["day"]: k["close"] for k in klines}
+            rows = db.query(ETFShare).filter(
+                ETFShare.fund_code == fund.code,
+                ETFShare.price == None,
+            ).all()
+            for row in rows:
+                price = price_map.get(row.trade_date.isoformat())
+                if price:
+                    row.price = price
+                    row.total_market_cap = round(row.shares * price, 2) if row.shares else None
+
+        # 腾讯补当天实时价格(更准确)
+        codes = [{"code": f.code, "market": f.market} for f in funds]
+        realtime = {item["code"]: item for item in fetch_etf_realtime(codes)}
+        for fund in funds:
+            rt = realtime.get(fund.code)
+            if not rt or not rt["price"]:
+                continue
+            row = db.query(ETFShare).filter(
+                ETFShare.fund_code == fund.code, ETFShare.trade_date == today
+            ).first()
+            if row:
                 row.price = rt["price"]
                 row.total_market_cap = round(row.shares * rt["price"], 2) if row.shares else None
 
+        logger.info(f"  [update] 补价格: {len(funds)} 只追踪ETF")
+
+    # === 4. 补算份额变化 ===
     try:
         _calc_change_shares(db)
     except Exception:
