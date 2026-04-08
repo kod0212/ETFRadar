@@ -41,10 +41,15 @@ jobs:
           cd backend
           python build_exe.py
 
+      - name: 获取版本号
+        id: version
+        shell: bash
+        run: echo "ver=$(grep 'VERSION' backend/app/core/config.py | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')" >> $GITHUB_OUTPUT
+
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
-          name: ETFRadar-Windows
+          name: ETFRadar-Windows-v${{ steps.version.outputs.ver }}
           path: backend/dist/ETFRadar/
 
   build-mac:
@@ -78,8 +83,12 @@ jobs:
           cd backend
           python build_exe.py
 
+      - name: 获取版本号
+        id: version
+        run: echo "ver=$(grep 'VERSION' backend/app/core/config.py | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')" >> $GITHUB_OUTPUT
+
       - name: 上传产物
         uses: actions/upload-artifact@v4
         with:
-          name: ETFRadar-Mac
+          name: ETFRadar-Mac-v${{ steps.version.outputs.ver }}
           path: backend/dist/ETFRadar/
