@@ -8,6 +8,7 @@ from datetime import date
 from app.api.deps import get_db
 from app.models.models import CollectLog, ETFShare
 from app.services.collector import incremental_update, get_update_status
+from app.core.config import VERSION
 from app.schemas.common import ApiResponse
 
 router = APIRouter(prefix="/collect", tags=["采集控制"])
@@ -25,6 +26,7 @@ def collect_status(db: Session = Depends(get_db)):
     max_date = db.query(func.max(ETFShare.trade_date)).scalar()
     logs = db.query(CollectLog).order_by(CollectLog.created_at.desc()).limit(10).all()
     data = {
+        "version": VERSION,
         "latest_date": str(max_date) if max_date else None,
         "today": str(date.today()),
         "is_up_to_date": str(max_date) == str(date.today()) if max_date else False,

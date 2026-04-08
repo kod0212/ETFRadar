@@ -3,6 +3,7 @@
     <a-layout-sider v-model:collapsed="collapsed" collapsible theme="light" :width="200">
       <div style="height: 48px; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: bold; color: #1677ff">
         📡 ETF雷达
+        <span style="font-size: 11px; font-weight: normal; color: #999; margin-left: 4px">{{ version }}</span>
       </div>
       <a-menu mode="inline" :selectedKeys="[currentRoute]" @click="onMenuClick">
         <a-menu-item key="dashboard">
@@ -40,6 +41,7 @@ const router = useRouter()
 const route = useRoute()
 const collapsed = ref(false)
 const collecting = ref(false)
+const version = ref('')
 
 const currentRoute = computed(() => String(route.name || 'dashboard'))
 const pageTitle = computed(() => {
@@ -48,6 +50,16 @@ const pageTitle = computed(() => {
 })
 
 const onMenuClick = ({ key }: { key: string }) => router.push({ name: key })
+
+// 获取版本号
+import { onMounted } from 'vue'
+import { getCollectStatus } from './api'
+onMounted(async () => {
+  try {
+    const res = await getCollectStatus()
+    version.value = res.data.data?.version ? `v${res.data.data.version}` : ''
+  } catch { /* empty */ }
+})
 
 const onCollect = async () => {
   collecting.value = true

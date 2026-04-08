@@ -17,12 +17,15 @@ async def lifespan(app: FastAPI):
     from app.core.database import init_db
     from app.core.init_data import init_seed_data
     setup_logging()
+    import logging
+    from app.core.config import VERSION
+    logging.getLogger(__name__).info(f"ETF雷达 v{VERSION} 启动")
     init_seed_data()
     init_db()
     yield
 
 
-app = FastAPI(title="ETF雷达", version="0.1.0", docs_url="/api/docs", lifespan=lifespan)
+app = FastAPI(title="ETF雷达", version="1.0.0", docs_url="/api/docs", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
