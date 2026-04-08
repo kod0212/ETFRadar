@@ -47,8 +47,11 @@ if STATIC_DIR.exists():
         """SPA fallback: 非API请求都返回 index.html"""
         file_path = STATIC_DIR / full_path
         if file_path.is_file():
-            return FileResponse(file_path)
-        return FileResponse(STATIC_DIR / "index.html")
+            # assets有hash指纹可以长缓存，其他不缓存
+            if full_path.startswith("assets/"):
+                return FileResponse(file_path, headers={"Cache-Control": "public, max-age=31536000"})
+            return FileResponse(file_path, headers={"Cache-Control": "no-cache"})
+        return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
 else:
     @app.get("/")
     def root():
