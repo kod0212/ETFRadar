@@ -1,3 +1,5 @@
+import logging
+logger = logging.getLogger(__name__)
 """数据采集服务"""
 import requests
 import json
@@ -149,7 +151,7 @@ def _do_incremental_update(db: Session) -> dict:
 
     # 需要补的日期范围
     start = max_date + timedelta(days=1)
-    print(f"[update] 增量更新: {start} → {today}")
+    logger.info(f"[update] 增量更新: {start} → {today}")
 
     # 1. 获取已追踪ETF的实时价格
     funds = db.query(ETFFund).filter(ETFFund.is_active == True).all()
@@ -175,7 +177,7 @@ def _do_incremental_update(db: Session) -> dict:
                 mcap = round(shares * price, 2) if price else None
                 _upsert_share(db, code, d, price, mcap, shares, "sse_daily")
                 total_count += 1
-            print(f"  [update] {dt_str}: 上交所 {len(sse_data)} 只")
+            logger.info(f"  [update] {dt_str}: 上交所 {len(sse_data)} 只")
         time.sleep(0.3)
         d += timedelta(days=1)
 
@@ -188,7 +190,7 @@ def _do_incremental_update(db: Session) -> dict:
         _upsert_share(db, code, dt_date, price, mcap, shares, "szse_api")
         total_count += 1
     if szse_records:
-        print(f"  [update] 深交所: {len(szse_records)} 条")
+        logger.info(f"  [update] 深交所: {len(szse_records)} 条")
 
     # 4. 补已追踪ETF的价格
     for fund in funds:
@@ -253,7 +255,7 @@ def backfill_history():
     db = SessionLocal()
     try:
         if db.query(ETFShare).count() > 1:
-            print("[backfill] etf_share 已有数据，跳过")
+            logger.info("[backfill] etf_share 已有数据，跳过")
             return
 
         funds = db.query(ETFFund).filter(ETFFund.is_active == True).all()
@@ -261,18 +263,18 @@ def backfill_history():
             return
 
         # 1. 获取每周五的上交所精确份额(约52周)
-        print("[backfill] 获取上交所历史份额...")
+        logger.info("[backfill] 获取上交所历史份额...")
         sample_dates = _get_weekly_dates(365)
         sse_history = {}  # {date_str: {code: shares_yi}}
         for dt_str in sample_dates:
             data = fetch_sse_shares_by_date(dt_str)
             if data:
                 sse_history[dt_str] = data
-                print(f"  {dt_str}: {len(data)} 只ETF")
+                logger.info(f"  {dt_str}: {len(data)} 只ETF")
             time.sleep(0.5)
 
         if not sse_history:
-            print("[backfill] 无上交所历史数据")
+            logger.info("[backfill] 无上交所历史数据")
             return
 
         # 2. 对每只ETF: 获取每日价格 + 插值份额
@@ -298,7 +300,7 @@ def backfill_history():
                     share_points = _fetch_szse_history(fund.code)
 
                 if not share_points:
-                    print(f"[backfill] {fund.code} 无份额数据，跳过")
+                    logger.info(f"[backfill] {fund.code} 无份额数据，跳过")
                     continue
 
                 # 每日记录: 价格来自新浪, 份额在采样点间插值
@@ -319,13 +321,13 @@ def backfill_history():
                     ).first():
                         db.add(r)
                 db.commit()
-                print(f"[backfill] {fund.code} {fund.name}: {len(records)} 条 (份额采样点: {len(share_points)})")
+                logger.info(f"[backfill] {fund.code} {fund.name}: {len(records)} 条 (份额采样点: {len(share_points)})")
             except Exception as e:
                 db.rollback()
-                print(f"[backfill] {fund.code} 失败: {e}")
+                logger.info(f"[backfill] {fund.code} 失败: {e}")
 
         _calc_change_shares(db)
-        print("[backfill] 历史数据回补完成")
+        logger.info("[backfill] 历史数据回补完成")
     finally:
         db.close()
 

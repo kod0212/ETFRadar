@@ -13,8 +13,10 @@ STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from app.core.logging import setup_logging
     from app.core.database import init_db
     from app.core.init_data import init_seed_data
+    setup_logging()
     init_seed_data()
     init_db()
     yield

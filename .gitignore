@@ -19,3 +19,4 @@ backend/dist/
 backend/build/
 backend/*.spec
 backend/static/
+backend/log/

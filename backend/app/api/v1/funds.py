@@ -1,3 +1,5 @@
+import logging
+logger = logging.getLogger(__name__)
 """API 路由 - ETF管理"""
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -70,6 +72,7 @@ def create_fund(body: FundCreate, db: Session = Depends(get_db)):
     db.add(fund)
     db.commit()
     db.refresh(fund)
+    logger.info(f"添加ETF: {fund.code} {fund.name}")
     return ApiResponse(data=FundOut.model_validate(fund))
 
 
@@ -92,4 +95,5 @@ def delete_fund(code: str, db: Session = Depends(get_db)):
         raise HTTPException(404, f"ETF {code} 不存在")
     db.delete(fund)
     db.commit()
+    logger.info(f"删除ETF: {code}")
     return ApiResponse(message=f"ETF {code} 已删除")

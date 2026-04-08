@@ -1,3 +1,5 @@
+import logging
+logger = logging.getLogger(__name__)
 """API 路由 - 采集控制"""
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
