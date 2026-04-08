@@ -122,6 +122,10 @@ def collect_today(db: Session = None) -> dict:
             db.close()
 
 
+def get_update_status() -> dict:
+    return dict(_update_status)
+
+
 def incremental_update(db: Session) -> dict:
     """增量更新: 检查DB最新日期, 补上缺失的天数"""
     if not _update_lock.acquire(blocking=False):
@@ -153,14 +157,19 @@ def _do_incremental_update(db: Session) -> dict:
 
     start = max_date + timedelta(days=1)
     logger.info(f"[update] 增量更新: {start} → {today}")
+    _update_status.update(running=True, step="开始更新", progress=f"{start} → {today}")
 
     total_count = 0
-    all_codes = set()  # 收集本次出现的所有ETF代码
+    all_codes = set()
 
     # === 1. 上交所: 逐日获取全部ETF份额 ===
     d = start
+    days_total = (today - start).days + 1
+    day_idx = 0
     while d <= today:
         dt_str = d.strftime("%Y%m%d")
+        day_idx += 1
+        _update_status.update(step="获取上交所份额", progress=f"{day_idx}/{days_total} ({dt_str})")
         sse_data = fetch_sse_shares_by_date(dt_str)
         if sse_data:
             for code, shares in sse_data.items():
@@ -172,6 +181,7 @@ def _do_incremental_update(db: Session) -> dict:
         d += timedelta(days=1)
 
     # === 2. 深交所: 按日期范围获取全部ETF份额 ===
+    _update_status.update(step="获取深交所份额", progress="请求中...")
     szse_records = _fetch_szse_range(start.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"))
     for code, dt_date, shares in szse_records:
         _upsert_share(db, code, dt_date, None, None, shares, "szse_api")
@@ -183,6 +193,7 @@ def _do_incremental_update(db: Session) -> dict:
     db.commit()
 
     # === 3. 全部ETF补价格(新浪K线) ===
+    _update_status.update(step="补全价格数据", progress="查询中...")
     dict_map = {d.code: d.market for d in db.query(ETFDict).all()}
     no_price_codes = [r[0] for r in db.execute(
         text("SELECT DISTINCT fund_code FROM etf_share WHERE price IS NULL AND trade_date >= :start"),
@@ -190,7 +201,9 @@ def _do_incremental_update(db: Session) -> dict:
     ).fetchall()]
 
     price_count = 0
-    for code in no_price_codes:
+    for idx, code in enumerate(no_price_codes):
+        if (idx + 1) % 20 == 0:
+            _update_status.update(progress=f"{idx+1}/{len(no_price_codes)}")
         market = dict_map.get(code, "sh" if code.startswith(("5", "1")) else "sz")
         try:
             klines = _fetch_sina_kline(code, market, 30)
@@ -231,6 +244,7 @@ def _do_incremental_update(db: Session) -> dict:
     db.add(CollectLog(trade_date=today, status="success", fund_count=total_count,
                       message=f"增量更新 {start}→{today}, 份额{total_count}条, 价格{price_count}条"))
     db.commit()
+    _update_status.update(running=False, step="更新完成", progress=f"份额{total_count}条, 价格{price_count}条")
     return {"status": "success", "updated": total_count, "range": f"{start} → {today}"}
 
 
@@ -471,9 +485,10 @@ def _calc_change_shares(db: Session):
     db.commit()
 
 
-# 增量更新锁，防止并发
+# 增量更新锁和状态
 import threading
 _update_lock = threading.Lock()
+_update_status = {"running": False, "step": "", "progress": ""}
 
 
 def _upsert_share(db: Session, code: str, trade_date, price, mcap, shares, source: str):

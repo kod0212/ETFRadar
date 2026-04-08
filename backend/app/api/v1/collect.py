@@ -7,7 +7,7 @@ from sqlalchemy import func
 from datetime import date
 from app.api.deps import get_db
 from app.models.models import CollectLog, ETFShare
-from app.services.collector import incremental_update
+from app.services.collector import incremental_update, get_update_status
 from app.schemas.common import ApiResponse
 
 router = APIRouter(prefix="/collect", tags=["采集控制"])
@@ -28,6 +28,7 @@ def collect_status(db: Session = Depends(get_db)):
         "latest_date": str(max_date) if max_date else None,
         "today": str(date.today()),
         "is_up_to_date": str(max_date) == str(date.today()) if max_date else False,
+        "update": get_update_status(),
         "logs": [
             {"trade_date": str(l.trade_date), "status": l.status,
              "fund_count": l.fund_count, "message": l.message,

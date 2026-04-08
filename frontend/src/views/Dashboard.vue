@@ -1,12 +1,20 @@
 <template>
   <div>
+    <!-- 更新状态条 -->
+    <a-alert v-if="updateStatus.running" type="info" show-icon style="margin-bottom: 16px"
+             :message="`数据更新中: ${updateStatus.step}`"
+             :description="updateStatus.progress" />
+    <a-alert v-else-if="updateStatus.step === '更新完成'" type="success" show-icon closable
+             style="margin-bottom: 16px"
+             :message="`数据已更新: ${updateStatus.progress}`" />
+
     <!-- 指标卡片 -->
     <a-row :gutter="16" style="margin-bottom: 24px">
       <a-col :span="8">
         <a-statistic title="追踪ETF数" :value="latestData.length" />
       </a-col>
       <a-col :span="8">
-        <a-statistic title="最近采集时间" :value="lastCollectTime" />
+        <a-statistic title="数据最新日期" :value="lastCollectTime" />
       </a-col>
       <a-col :span="8">
         <a-statistic title="沪深300合计市值(亿元)" :value="hs300TotalMcap" :precision="2" />
@@ -61,8 +69,10 @@ const trendData = ref<any[]>([])
 const selectedGroup = ref('沪深300')
 const metric = ref('market_cap')
 const lastCollectTime = ref('-')
+const updateStatus = ref({ running: false, step: '', progress: '' })
 const chartRef = ref<HTMLElement>()
 let chart: echarts.ECharts | null = null
+let pollTimer: any = null
 
 const hs300TotalMcap = computed(() =>
   latestData.value.filter(d => d.group_tag === '沪深300').reduce((s, d) => s + (d.total_market_cap || 0), 0)
@@ -102,22 +112,35 @@ const loadTrend = async () => {
   } catch { /* empty */ }
 }
 
+const pollStatus = async () => {
+  try {
+    const res = await getCollectStatus()
+    const s = res.data.data
+    updateStatus.value = s.update || { running: false, step: '', progress: '' }
+    if (!updateStatus.value.running && pollTimer) {
+      clearInterval(pollTimer)
+      pollTimer = null
+      // 更新完成，刷新数据
+      const latestRes = await getLatestShares()
+      latestData.value = latestRes.data.data || []
+      lastCollectTime.value = s.latest_date || '-'
+      await loadTrend()
+    }
+  } catch { /* empty */ }
+}
+
 onMounted(async () => {
   try {
-    // 先加载已有数据
     const [latestRes, statusRes] = await Promise.all([getLatestShares(), getCollectStatus()])
     latestData.value = latestRes.data.data || []
     const status = statusRes.data.data
     lastCollectTime.value = status?.latest_date || '-'
+    updateStatus.value = status?.update || { running: false, step: '', progress: '' }
 
-    // 后台尝试增量更新（不阻塞页面展示）
     if (status && !status.is_up_to_date) {
-      console.log(`数据不是最新(${status.latest_date}), 后台更新...`)
-      triggerCollect().then(async () => {
-        const res = await getLatestShares()
-        latestData.value = res.data.data || []
-        await loadTrend()
-      }).catch(() => {})
+      triggerCollect().catch(() => {})
+      // 开始轮询状态
+      pollTimer = setInterval(pollStatus, 2000)
     }
   } catch { /* empty */ }
   await loadTrend()
