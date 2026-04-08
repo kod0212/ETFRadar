@@ -120,6 +120,16 @@ def collect_today(db: Session = None) -> dict:
 
 
 def incremental_update(db: Session) -> dict:
+    """增量更新: 检查DB最新日期, 补上缺失的天数"""
+    if not _update_lock.acquire(blocking=False):
+        return {"status": "busy", "message": "更新正在进行中"}
+    try:
+        return _do_incremental_update(db)
+    finally:
+        _update_lock.release()
+
+
+def _do_incremental_update(db: Session) -> dict:
     """
     增量更新: 检查数据库最新日期, 补上缺失的天数
     - 上交所: fetch_sse_shares_by_date 逐日补
@@ -156,27 +166,23 @@ def incremental_update(db: Session) -> dict:
             for code, shares in sse_data.items():
                 price = realtime.get(code, {}).get("price") if d == today else None
                 mcap = round(shares * price, 2) if price else None
-                if not db.query(ETFShare).filter(ETFShare.fund_code == code, ETFShare.trade_date == d).first():
-                    db.add(ETFShare(fund_code=code, trade_date=d, price=price,
-                                    total_market_cap=mcap, shares=round(shares, 4), source="sse_daily"))
-                    total_count += 1
+                _upsert_share(db, code, d, price, mcap, shares, "sse_daily")
+                total_count += 1
             print(f"  [update] {dt_str}: 上交所 {len(sse_data)} 只")
         time.sleep(0.3)
         d += timedelta(days=1)
 
-    # 3. 补深交所份额(全部ETF, 按日期范围一次查)
+    # 3. 补深交所份额
     szse_records = _fetch_szse_range(start.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"))
     for code, dt_date, shares in szse_records:
-        if not db.query(ETFShare).filter(ETFShare.fund_code == code, ETFShare.trade_date == dt_date).first():
-            price = realtime.get(code, {}).get("price") if dt_date == today else None
-            mcap = round(shares * price, 2) if price else None
-            db.add(ETFShare(fund_code=code, trade_date=dt_date, price=price,
-                            total_market_cap=mcap, shares=round(shares, 4), source="szse_api"))
-            total_count += 1
+        price = realtime.get(code, {}).get("price") if dt_date == today else None
+        mcap = round(shares * price, 2) if price else None
+        _upsert_share(db, code, dt_date, price, mcap, shares, "szse_api")
+        total_count += 1
     if szse_records:
         print(f"  [update] 深交所: {len(szse_records)} 条")
 
-    # 4. 补已追踪ETF的价格和change_shares
+    # 4. 补已追踪ETF的价格
     for fund in funds:
         rt = realtime.get(fund.code)
         if rt and rt["price"]:
@@ -185,7 +191,11 @@ def incremental_update(db: Session) -> dict:
                 row.price = rt["price"]
                 row.total_market_cap = round(row.shares * rt["price"], 2) if row.shares else None
 
-    _calc_change_shares(db)
+    try:
+        _calc_change_shares(db)
+    except Exception:
+        db.rollback()
+
     db.add(CollectLog(trade_date=today, status="success", fund_count=total_count,
                       message=f"增量更新 {start}→{today}, {total_count} 条"))
     db.commit()
@@ -427,3 +437,30 @@ def _calc_change_shares(db: Session):
             if rows[i].change_shares is None and rows[i].shares and rows[i - 1].shares:
                 rows[i].change_shares = round(rows[i].shares - rows[i - 1].shares, 4)
     db.commit()
+
+
+# 增量更新锁，防止并发
+import threading
+_update_lock = threading.Lock()
+
+
+def _upsert_share(db: Session, code: str, trade_date, price, mcap, shares, source: str):
+    """插入或更新份额记录"""
+    existing = db.query(ETFShare).filter(
+        ETFShare.fund_code == code, ETFShare.trade_date == trade_date
+    ).first()
+    if existing:
+        if price and not existing.price:
+            existing.price = price
+            existing.total_market_cap = mcap
+    else:
+        db.add(ETFShare(
+            fund_code=code, trade_date=trade_date, price=price,
+            total_market_cap=mcap, shares=round(shares, 4) if shares else None,
+            source=source,
+        ))
+    # 定期flush避免内存积压
+    try:
+        db.flush()
+    except Exception:
+        db.rollback()
