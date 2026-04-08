@@ -7,6 +7,7 @@ import re
 import time
 from datetime import date, datetime, timedelta
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from app.core.database import SessionLocal
 from app.models.models import ETFFund, ETFShare, CollectLog
 
@@ -133,13 +134,13 @@ def incremental_update(db: Session) -> dict:
 
 def _do_incremental_update(db: Session) -> dict:
     """
-    增量更新逻辑（全部ETF份额 + 追踪ETF价格）:
-    1. 上交所: 逐日获取全部ETF份额
-    2. 深交所: 按日期范围获取全部ETF份额
-    3. 追踪ETF: 新浪K线补历史价格 + 腾讯补当天价格
-    4. 补算市值和份额变化
+    增量更新: 全部ETF的份额+价格+市值，不区分是否追踪
+    1. 上交所/深交所: 获取全部ETF份额
+    2. 全部ETF: 新浪K线补价格, 腾讯补当天价格
+    3. 新上市ETF: 自动加入字典表
     """
     from sqlalchemy import func as sqlfunc
+    from app.models.models import ETFDict
 
     max_date = db.query(sqlfunc.max(ETFShare.trade_date)).scalar()
     today = date.today()
@@ -154,8 +155,9 @@ def _do_incremental_update(db: Session) -> dict:
     logger.info(f"[update] 增量更新: {start} → {today}")
 
     total_count = 0
+    all_codes = set()  # 收集本次出现的所有ETF代码
 
-    # === 1. 上交所: 逐日获取全部ETF份额(只存份额,不存价格) ===
+    # === 1. 上交所: 逐日获取全部ETF份额 ===
     d = start
     while d <= today:
         dt_str = d.strftime("%Y%m%d")
@@ -163,6 +165,7 @@ def _do_incremental_update(db: Session) -> dict:
         if sse_data:
             for code, shares in sse_data.items():
                 _upsert_share(db, code, d, None, None, shares, "sse_daily")
+                all_codes.add(code)
                 total_count += 1
             logger.info(f"  [update] {dt_str}: 上交所 {len(sse_data)} 只")
         time.sleep(0.3)
@@ -172,53 +175,61 @@ def _do_incremental_update(db: Session) -> dict:
     szse_records = _fetch_szse_range(start.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"))
     for code, dt_date, shares in szse_records:
         _upsert_share(db, code, dt_date, None, None, shares, "szse_api")
+        all_codes.add(code)
         total_count += 1
     if szse_records:
         logger.info(f"  [update] 深交所: {len(szse_records)} 条")
 
     db.commit()
 
-    # === 3. 追踪ETF: 补价格和市值 ===
-    funds = db.query(ETFFund).filter(ETFFund.is_active == True).all()
-    if funds:
-        # 新浪K线补历史价格(缺失的日期)
-        for fund in funds:
-            klines = _fetch_sina_kline(fund.code, fund.market, 30)
+    # === 3. 全部ETF补价格(新浪K线) ===
+    dict_map = {d.code: d.market for d in db.query(ETFDict).all()}
+    no_price_codes = [r[0] for r in db.execute(
+        text("SELECT DISTINCT fund_code FROM etf_share WHERE price IS NULL AND trade_date >= :start"),
+        {"start": str(start)}
+    ).fetchall()]
+
+    price_count = 0
+    for code in no_price_codes:
+        market = dict_map.get(code, "sh" if code.startswith(("5", "1")) else "sz")
+        try:
+            klines = _fetch_sina_kline(code, market, 30)
             price_map = {k["day"]: k["close"] for k in klines}
             rows = db.query(ETFShare).filter(
-                ETFShare.fund_code == fund.code,
-                ETFShare.price == None,
+                ETFShare.fund_code == code, ETFShare.price == None
             ).all()
             for row in rows:
                 price = price_map.get(row.trade_date.isoformat())
                 if price:
                     row.price = price
                     row.total_market_cap = round(row.shares * price, 2) if row.shares else None
+                    price_count += 1
+        except Exception:
+            pass
+        time.sleep(0.1)
 
-        # 腾讯补当天实时价格(更准确)
-        codes = [{"code": f.code, "market": f.market} for f in funds]
-        realtime = {item["code"]: item for item in fetch_etf_realtime(codes)}
-        for fund in funds:
-            rt = realtime.get(fund.code)
-            if not rt or not rt["price"]:
-                continue
-            row = db.query(ETFShare).filter(
-                ETFShare.fund_code == fund.code, ETFShare.trade_date == today
-            ).first()
-            if row:
-                row.price = rt["price"]
-                row.total_market_cap = round(row.shares * rt["price"], 2) if row.shares else None
+    db.commit()
+    logger.info(f"  [update] 补价格: {price_count} 条 ({len(no_price_codes)} 只ETF)")
 
-        logger.info(f"  [update] 补价格: {len(funds)} 只追踪ETF")
+    # === 4. 检查新上市ETF, 加入字典表 ===
+    existing_dict = {d.code for d in db.query(ETFDict).all()}
+    new_codes = all_codes - existing_dict
+    if new_codes:
+        for code in new_codes:
+            info = _lookup_from_tencent_simple(code)
+            if info:
+                db.add(ETFDict(code=code, name=info["name"], market=info["market"]))
+        db.commit()
+        logger.info(f"  [update] 新增ETF字典: {len(new_codes)} 只")
 
-    # === 4. 补算份额变化 ===
+    # === 5. 补算份额变化(仅追踪ETF) ===
     try:
         _calc_change_shares(db)
     except Exception:
         db.rollback()
 
     db.add(CollectLog(trade_date=today, status="success", fund_count=total_count,
-                      message=f"增量更新 {start}→{today}, {total_count} 条"))
+                      message=f"增量更新 {start}→{today}, 份额{total_count}条, 价格{price_count}条"))
     db.commit()
     return {"status": "success", "updated": total_count, "range": f"{start} → {today}"}
 
@@ -485,3 +496,20 @@ def _upsert_share(db: Session, code: str, trade_date, price, mcap, shares, sourc
         db.flush()
     except Exception:
         db.rollback()
+
+
+def _lookup_from_tencent_simple(code: str) -> dict:
+    """腾讯接口查ETF名称和市场"""
+    for market in ["sh", "sz"]:
+        try:
+            resp = requests.get(f"https://qt.gtimg.cn/q={market}{code}", timeout=5)
+            resp.encoding = "gbk"
+            for line in resp.text.strip().split(";"):
+                if "~" not in line:
+                    continue
+                fields = line.split("~")
+                if len(fields) > 3 and fields[2] == code and fields[1]:
+                    return {"code": code, "name": fields[1], "market": market}
+        except Exception:
+            continue
+    return None
