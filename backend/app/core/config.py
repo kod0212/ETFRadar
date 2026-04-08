@@ -3,7 +3,12 @@ import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
-DATA_DIR = BASE_DIR / "data"
+
+# exe 模式下数据目录在 exe 同级，否则在 backend/data
+if os.environ.get("ETF_DATA_DIR"):
+    DATA_DIR = Path(os.environ["ETF_DATA_DIR"])
+else:
+    DATA_DIR = BASE_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
 DATABASE_URL = f"sqlite:///{DATA_DIR / 'etf.db'}"
@@ -19,6 +24,5 @@ DEFAULT_ETFS = [
     {"code": "159915", "name": "易方达创业板ETF", "market": "sz", "index_name": "创业板", "group_tag": "创业板"},
 ]
 
-# 采集配置
-COLLECT_HOUR = 16  # 每日采集时间 (收盘后)
+COLLECT_HOUR = 16
 COLLECT_MINUTE = 5

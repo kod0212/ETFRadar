@@ -15,3 +15,7 @@ frontend/dist/
 *.log
 .idea/
 .vscode/
+backend/dist/
+backend/build/
+backend/*.spec
+backend/static/
