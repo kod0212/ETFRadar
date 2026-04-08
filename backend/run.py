@@ -21,7 +21,7 @@ if getattr(sys, 'frozen', False):
 def open_browser():
     import time
     time.sleep(2)
-    webbrowser.open("http://localhost:8000")
+    webbrowser.open("http://localhost:9528")
 
 
 if __name__ == "__main__":
@@ -34,4 +34,4 @@ if __name__ == "__main__":
 
     import uvicorn
     from app.main import app
-    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=9528, log_level="info")

@@ -6,7 +6,7 @@ services:
     volumes:
       - etf_data:/app/data
     ports:
-      - "8000:8000"
+      - "9528:9528"
 
   frontend:
     build:

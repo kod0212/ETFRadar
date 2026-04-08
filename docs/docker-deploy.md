@@ -27,7 +27,7 @@ docker compose up --build
 启动成功后会看到：
 
 ```
-backend-1   | INFO:     Uvicorn running on http://0.0.0.0:8000
+backend-1   | INFO:     Uvicorn running on http://0.0.0.0:9528
 frontend-1  | /docker-entrypoint.sh: Configuration complete; ready for start up
 ```
 
@@ -36,8 +36,8 @@ frontend-1  | /docker-entrypoint.sh: Configuration complete; ready for start up
 | 服务 | 地址 | 说明 |
 |------|------|------|
 | 前端页面 | http://localhost:5173 | 主界面 |
-| 后端 API | http://localhost:8000 | API 服务 |
-| API 文档 | http://localhost:8000/api/docs | Swagger UI |
+| 后端 API | http://localhost:9528 | API 服务 |
+| API 文档 | http://localhost:9528/api/docs | Swagger UI |
 
 ## 常用命令
 
@@ -82,7 +82,7 @@ docker volume ls | grep etf
 services:
   backend:
     ports:
-      - "9000:8000"    # 改为 9000
+      - "9000:9528"    # 改为 9000
   frontend:
     ports:
       - "3000:80"      # 改为 3000

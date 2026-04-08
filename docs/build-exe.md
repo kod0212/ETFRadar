@@ -25,7 +25,7 @@ python build_exe.py
 - **Windows**: 双击 `ETFRadar.exe`
 - **Mac/Linux**: 运行 `./ETFRadar`
 
-浏览器会自动打开 http://localhost:8000
+浏览器会自动打开 http://localhost:9528
 
 关闭命令行窗口即可退出。
 
