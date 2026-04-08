@@ -35,6 +35,15 @@ class ETFShare(Base):
     )
 
 
+class ETFDict(Base):
+    """ETF字典表 - 全部ETF代码和名称"""
+    __tablename__ = "etf_dict"
+
+    code = Column(String(10), primary_key=True)
+    name = Column(String(100), nullable=False)
+    market = Column(String(2), nullable=False)  # sh / sz
+
+
 class CollectLog(Base):
     __tablename__ = "collect_log"
 

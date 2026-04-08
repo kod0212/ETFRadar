@@ -13,20 +13,25 @@ router = APIRouter(prefix="/funds", tags=["ETF管理"])
 
 @router.get("/lookup", response_model=ApiResponse)
 def lookup_fund(code: str = Query(..., description="6位基金代码"), db: Session = Depends(get_db)):
-    """根据代码查询ETF信息（自动识别名称和市场）"""
+    """根据代码查询ETF信息（优先本地字典，回退腾讯接口）"""
     # 检查是否已追踪
     existing = db.query(ETFFund).filter(ETFFund.code == code).first()
     if existing:
         return ApiResponse(code=400, message=f"{code} 已在追踪列表中")
 
-    # 检查预置数据中是否有份额记录
+    # 1. 优先查本地字典表
+    from app.models.models import ETFDict
+    dict_entry = db.query(ETFDict).filter(ETFDict.code == code).first()
+    if dict_entry:
+        info = {"code": code, "name": dict_entry.name, "market": dict_entry.market}
+    else:
+        # 2. 回退腾讯接口
+        info = _lookup_from_tencent(code)
+        if not info:
+            return ApiResponse(code=404, message=f"未找到基金 {code}")
+
+    # 检查预置份额数据
     has_data = db.query(ETFShare).filter(ETFShare.fund_code == code).count()
-
-    # 腾讯接口查名称（先试sh再试sz）
-    info = _lookup_from_tencent(code)
-    if not info:
-        return ApiResponse(code=404, message=f"未找到基金 {code}")
-
     info["has_history"] = has_data > 0
     info["history_count"] = has_data
     return ApiResponse(data=info)
