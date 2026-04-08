@@ -1,13 +1,51 @@
 """API 路由 - ETF管理"""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import Optional
+import requests
 from app.api.deps import get_db
-from app.models.models import ETFFund
+from app.models.models import ETFFund, ETFShare
 from app.schemas.fund import FundCreate, FundUpdate, FundOut
 from app.schemas.common import ApiResponse
 
 router = APIRouter(prefix="/funds", tags=["ETF管理"])
+
+
+@router.get("/lookup", response_model=ApiResponse)
+def lookup_fund(code: str = Query(..., description="6位基金代码"), db: Session = Depends(get_db)):
+    """根据代码查询ETF信息（自动识别名称和市场）"""
+    # 检查是否已追踪
+    existing = db.query(ETFFund).filter(ETFFund.code == code).first()
+    if existing:
+        return ApiResponse(code=400, message=f"{code} 已在追踪列表中")
+
+    # 检查预置数据中是否有份额记录
+    has_data = db.query(ETFShare).filter(ETFShare.fund_code == code).count()
+
+    # 腾讯接口查名称（先试sh再试sz）
+    info = _lookup_from_tencent(code)
+    if not info:
+        return ApiResponse(code=404, message=f"未找到基金 {code}")
+
+    info["has_history"] = has_data > 0
+    info["history_count"] = has_data
+    return ApiResponse(data=info)
+
+
+def _lookup_from_tencent(code: str) -> dict:
+    for market in ["sh", "sz"]:
+        try:
+            resp = requests.get(f"https://qt.gtimg.cn/q={market}{code}", timeout=5)
+            resp.encoding = "gbk"
+            for line in resp.text.strip().split(";"):
+                if "~" not in line:
+                    continue
+                fields = line.split("~")
+                if len(fields) > 3 and fields[2] == code and fields[1]:
+                    return {"code": code, "name": fields[1], "market": market}
+        except Exception:
+            continue
+    return None
 
 
 @router.get("", response_model=ApiResponse)

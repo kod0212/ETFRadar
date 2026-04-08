@@ -14,38 +14,56 @@
       </template>
     </a-table>
 
-    <a-modal v-model:open="showAdd" title="添加ETF" @ok="onAdd" :confirmLoading="adding">
+    <a-modal v-model:open="showAdd" title="添加ETF" @ok="onAdd" :confirmLoading="adding"
+             :okButtonProps="{ disabled: !lookupResult }">
       <a-form :labelCol="{ span: 6 }">
-        <a-form-item label="基金代码"><a-input v-model:value="form.code" placeholder="如 510300" /></a-form-item>
-        <a-form-item label="名称"><a-input v-model:value="form.name" /></a-form-item>
-        <a-form-item label="市场">
-          <a-select v-model:value="form.market">
-            <a-select-option value="sh">上海</a-select-option>
-            <a-select-option value="sz">深圳</a-select-option>
-          </a-select>
+        <a-form-item label="基金代码">
+          <a-input-search v-model:value="inputCode" placeholder="输入6位代码后回车"
+                          :loading="looking" @search="onLookup" enter-button="查询" />
         </a-form-item>
-        <a-form-item label="跟踪指数"><a-input v-model:value="form.index_name" /></a-form-item>
-        <a-form-item label="分组"><a-input v-model:value="form.group_tag" /></a-form-item>
+        <template v-if="lookupResult">
+          <a-form-item label="名称">
+            <span>{{ lookupResult.name }}</span>
+          </a-form-item>
+          <a-form-item label="市场">
+            <a-tag :color="lookupResult.market === 'sh' ? 'blue' : 'green'">
+              {{ lookupResult.market === 'sh' ? '上海' : '深圳' }}
+            </a-tag>
+          </a-form-item>
+          <a-form-item label="历史数据">
+            <span v-if="lookupResult.has_history" style="color: #3f8600">
+              ✓ 有 {{ lookupResult.history_count }} 天历史份额
+            </span>
+            <span v-else style="color: #999">暂无历史数据</span>
+          </a-form-item>
+          <a-form-item label="分组">
+            <a-input v-model:value="groupTag" placeholder="可选，如：沪深300" />
+          </a-form-item>
+        </template>
+        <a-alert v-if="lookupError" :message="lookupError" type="error" show-icon style="margin-top: 8px" />
       </a-form>
     </a-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive } from 'vue'
+import { ref, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
-import { getFunds, createFund, updateFund, deleteFund } from '../api'
+import { getFunds, lookupFund, createFund, updateFund, deleteFund } from '../api'
 
 const funds = ref<any[]>([])
 const showAdd = ref(false)
 const adding = ref(false)
-const form = reactive({ code: '', name: '', market: 'sh', index_name: '', group_tag: '' })
+const inputCode = ref('')
+const looking = ref(false)
+const lookupResult = ref<any>(null)
+const lookupError = ref('')
+const groupTag = ref('')
 
 const columns = [
   { title: '代码', dataIndex: 'code', key: 'code', width: 100 },
   { title: '名称', dataIndex: 'name', key: 'name' },
   { title: '市场', dataIndex: 'market', key: 'market', width: 80 },
-  { title: '跟踪指数', dataIndex: 'index_name', key: 'index_name', width: 120 },
   { title: '分组', dataIndex: 'group_tag', key: 'group_tag', width: 100 },
   { title: '启用', key: 'is_active', width: 80 },
   { title: '操作', key: 'action', width: 80 },
@@ -56,13 +74,43 @@ const load = async () => {
   funds.value = res.data.data || []
 }
 
+const onLookup = async () => {
+  const code = inputCode.value.trim()
+  if (!code || code.length !== 6) {
+    lookupError.value = '请输入6位基金代码'
+    lookupResult.value = null
+    return
+  }
+  looking.value = true
+  lookupError.value = ''
+  lookupResult.value = null
+  try {
+    const res = await lookupFund(code)
+    if (res.data.code === 0) {
+      lookupResult.value = res.data.data
+    } else {
+      lookupError.value = res.data.message
+    }
+  } catch (e: any) {
+    lookupError.value = e.response?.data?.detail || '查询失败'
+  } finally { looking.value = false }
+}
+
 const onAdd = async () => {
+  if (!lookupResult.value) return
   adding.value = true
   try {
-    await createFund(form)
-    message.success('添加成功')
+    await createFund({
+      code: lookupResult.value.code,
+      name: lookupResult.value.name,
+      market: lookupResult.value.market,
+      group_tag: groupTag.value || null,
+    })
+    message.success(`已添加 ${lookupResult.value.name}`)
     showAdd.value = false
-    Object.assign(form, { code: '', name: '', market: 'sh', index_name: '', group_tag: '' })
+    inputCode.value = ''
+    lookupResult.value = null
+    groupTag.value = ''
     await load()
   } catch (e: any) {
     message.error(e.response?.data?.detail || '添加失败')
