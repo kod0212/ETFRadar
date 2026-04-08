@@ -1,6 +1,6 @@
 <template>
   <div>
-    <a-page-header :title="fundName" :sub-title="code" @back="$router.push('/')" />
+    <a-page-header :title="`${fundName} (${code})`" :sub-title="latestDate ? `最新数据: ${latestDate}` : ''" @back="$router.push('/')" />
 
     <a-card title="趋势图" size="small" style="margin-bottom: 16px">
       <template #extra>
@@ -30,7 +30,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import * as echarts from 'echarts'
-import { getShares, getSharesTrend } from '../api'
+import { getShares, getSharesTrend, getFunds } from '../api'
 
 const route = useRoute()
 const code = route.params.code as string
@@ -38,6 +38,7 @@ const fundName = ref(code)
 const shares = ref<any[]>([])
 const trendData = ref<any[]>([])
 const metric = ref('market_cap')
+const latestDate = ref('')
 const chartRef = ref<HTMLElement>()
 let chart: echarts.ECharts | null = null
 
@@ -74,10 +75,15 @@ const loadTrend = async () => {
 }
 
 onMounted(async () => {
-  const [sharesRes] = await Promise.all([
+  const [sharesRes, fundsRes] = await Promise.all([
     getShares({ code, limit: 500 }),
+    getFunds(),
   ])
   shares.value = sharesRes.data.data || []
+  const funds = fundsRes.data.data || []
+  const fund = funds.find((f: any) => f.code === code)
+  if (fund) fundName.value = fund.name
+  if (shares.value.length > 0) latestDate.value = shares.value[0].trade_date
   await loadTrend()
 })
 </script>

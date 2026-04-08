@@ -156,6 +156,12 @@ def _do_incremental_update(db: Session) -> dict:
     codes = [{"code": f.code, "market": f.market} for f in funds]
     realtime = {item["code"]: item for item in fetch_etf_realtime(codes)}
 
+    # 获取已追踪ETF的历史价格(补缺失日期的价格)
+    prices_map = {}  # {code: {date_str: price}}
+    for fund in funds:
+        klines = _fetch_sina_kline(fund.code, fund.market, 30)
+        prices_map[fund.code] = {k["day"]: k["close"] for k in klines}
+
     # 2. 逐日补上交所份额(全部ETF)
     total_count = 0
     d = start
@@ -163,8 +169,9 @@ def _do_incremental_update(db: Session) -> dict:
         dt_str = d.strftime("%Y%m%d")
         sse_data = fetch_sse_shares_by_date(dt_str)
         if sse_data:
+            dt_iso = d.isoformat()
             for code, shares in sse_data.items():
-                price = realtime.get(code, {}).get("price") if d == today else None
+                price = prices_map.get(code, {}).get(dt_iso) or (realtime.get(code, {}).get("price") if d == today else None)
                 mcap = round(shares * price, 2) if price else None
                 _upsert_share(db, code, d, price, mcap, shares, "sse_daily")
                 total_count += 1
@@ -175,7 +182,8 @@ def _do_incremental_update(db: Session) -> dict:
     # 3. 补深交所份额
     szse_records = _fetch_szse_range(start.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"))
     for code, dt_date, shares in szse_records:
-        price = realtime.get(code, {}).get("price") if dt_date == today else None
+        dt_iso = dt_date.isoformat()
+        price = prices_map.get(code, {}).get(dt_iso) or (realtime.get(code, {}).get("price") if dt_date == today else None)
         mcap = round(shares * price, 2) if price else None
         _upsert_share(db, code, dt_date, price, mcap, shares, "szse_api")
         total_count += 1
