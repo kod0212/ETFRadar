@@ -27,9 +27,9 @@ def open_browser():
 if __name__ == "__main__":
     threading.Thread(target=open_browser, daemon=True).start()
     print("=" * 40)
-    print("  📡 ETF雷达 正在启动...")
-    print("  浏览器将自动打开")
-    print("  关闭此窗口即可退出")
+    print("  ETF Radar starting...")
+    print("  Browser will open automatically")
+    print("  Close this window to exit")
     print("=" * 40)
 
     import uvicorn
