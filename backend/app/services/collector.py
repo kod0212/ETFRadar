@@ -244,7 +244,7 @@ def _do_incremental_update(db: Session) -> dict:
     db.add(CollectLog(trade_date=today, status="success", fund_count=total_count,
                       message=f"增量更新 {start}→{today}, 份额{total_count}条, 价格{price_count}条"))
     db.commit()
-    _update_status.update(running=False, step="更新完成", progress=f"份额{total_count}条, 价格{price_count}条")
+    _update_status.update(running=False, step="", progress="")
     return {"status": "success", "updated": total_count, "range": f"{start} → {today}"}
 
 

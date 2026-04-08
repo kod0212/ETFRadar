@@ -27,7 +27,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import * as echarts from 'echarts'
 import { getShares, getSharesTrend, getFunds } from '../api'
@@ -77,7 +77,10 @@ const loadTrend = async () => {
   renderChart()
 }
 
+const onResize = () => chart?.resize()
+
 onMounted(async () => {
+  window.addEventListener('resize', onResize)
   const [sharesRes, fundsRes] = await Promise.all([
     getShares({ code, limit: 500 }),
     getFunds(),
@@ -88,5 +91,11 @@ onMounted(async () => {
   if (fund) fundName.value = fund.name
   if (shares.value.length > 0) latestDate.value = shares.value[0].trade_date
   await loadTrend()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', onResize)
+  chart?.dispose()
+  chart = null
 })
 </script>

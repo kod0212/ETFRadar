@@ -4,9 +4,6 @@
     <a-alert v-if="updateStatus.running" type="info" show-icon style="margin-bottom: 16px"
              :message="`数据更新中: ${updateStatus.step}`"
              :description="updateStatus.progress" />
-    <a-alert v-else-if="updateStatus.step === '更新完成'" type="success" show-icon closable
-             style="margin-bottom: 16px"
-             :message="`数据已更新: ${updateStatus.progress}`" />
 
     <!-- 指标卡片 -->
     <a-row :gutter="16" style="margin-bottom: 24px">
@@ -60,7 +57,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import * as echarts from 'echarts'
 import { getLatestShares, getSharesTrend, getCollectStatus, triggerCollect } from '../api'
 
@@ -92,13 +89,11 @@ const columns = [
 
 const metricLabel = computed(() => metric.value === 'market_cap' ? '总市值(亿元)' : '份额(亿份)')
 
+const onResize = () => chart?.resize()
+
 const renderChart = () => {
   if (!chartRef.value) return
-  if (!chart) {
-    chart = echarts.init(chartRef.value)
-    // 窗口大小变化时自动resize
-    window.addEventListener('resize', () => chart?.resize())
-  }
+  if (!chart) chart = echarts.init(chartRef.value)
   chart.setOption({
     tooltip: { trigger: 'axis' },
     xAxis: { type: 'category', data: trendData.value.map(d => d.trade_date) },
@@ -124,7 +119,6 @@ const pollStatus = async () => {
     if (!updateStatus.value.running && pollTimer) {
       clearInterval(pollTimer)
       pollTimer = null
-      // 更新完成，刷新数据
       const latestRes = await getLatestShares()
       latestData.value = latestRes.data.data || []
       lastCollectTime.value = s.latest_date || '-'
@@ -133,25 +127,38 @@ const pollStatus = async () => {
   } catch { /* empty */ }
 }
 
+const COOLDOWN = 6 * 60 * 60 * 1000
+
+const shouldAutoUpdate = (isUpToDate: boolean): boolean => {
+  if (isUpToDate) return false
+  const lastAuto = Number(localStorage.getItem('etf_last_auto_update') || '0')
+  return Date.now() - lastAuto > COOLDOWN
+}
+
 onMounted(async () => {
+  window.addEventListener('resize', onResize)
+
   try {
     const [latestRes, statusRes] = await Promise.all([getLatestShares(), getCollectStatus()])
     latestData.value = latestRes.data.data || []
     const status = statusRes.data.data
     lastCollectTime.value = status?.latest_date || '-'
-    updateStatus.value = status?.update || { running: false, step: '', progress: '' }
 
-    if (status && !status.is_up_to_date) {
-      // 6小时内只自动触发一次
-      const COOLDOWN = 6 * 60 * 60 * 1000
-      const lastAuto = Number(localStorage.getItem('etf_last_auto_update') || '0')
-      if (Date.now() - lastAuto > COOLDOWN) {
-        localStorage.setItem('etf_last_auto_update', String(Date.now()))
-        triggerCollect().catch(() => {})
-        pollTimer = setInterval(pollStatus, 2000)
-      }
+    // 只在需要时触发自动更新
+    if (shouldAutoUpdate(status?.is_up_to_date)) {
+      localStorage.setItem('etf_last_auto_update', String(Date.now()))
+      updateStatus.value = { running: true, step: '准备更新...', progress: '' }
+      triggerCollect().catch(() => {})
+      pollTimer = setInterval(pollStatus, 2000)
     }
   } catch { /* empty */ }
   await loadTrend()
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', onResize)
+  if (pollTimer) clearInterval(pollTimer)
+  chart?.dispose()
+  chart = null
 })
 </script>
