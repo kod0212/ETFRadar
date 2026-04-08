@@ -41,6 +41,7 @@ PyInstaller.__main__.run([
     "--hidden-import=uvicorn.lifespan.on",
     "--hidden-import=sqlalchemy.dialects.sqlite",
     "--collect-submodules=akshare",
+    "--collect-data=akshare",       # 收集akshare的数据文件(calendar.json等)
     "--noconfirm",
     "--clean",
 ])

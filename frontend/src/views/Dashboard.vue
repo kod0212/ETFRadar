@@ -104,17 +104,21 @@ const loadTrend = async () => {
 
 onMounted(async () => {
   try {
-    // 先检查是否需要增量更新
-    const statusRes = await getCollectStatus()
-    const status = statusRes.data.data
-    if (!status.is_up_to_date) {
-      console.log(`数据不是最新(${status.latest_date}), 自动更新...`)
-      await triggerCollect()
-    }
-    // 加载数据
-    const latestRes = await getLatestShares()
+    // 先加载已有数据
+    const [latestRes, statusRes] = await Promise.all([getLatestShares(), getCollectStatus()])
     latestData.value = latestRes.data.data || []
-    lastCollectTime.value = status.latest_date || '-'
+    const status = statusRes.data.data
+    lastCollectTime.value = status?.latest_date || '-'
+
+    // 后台尝试增量更新（不阻塞页面展示）
+    if (status && !status.is_up_to_date) {
+      console.log(`数据不是最新(${status.latest_date}), 后台更新...`)
+      triggerCollect().then(async () => {
+        const res = await getLatestShares()
+        latestData.value = res.data.data || []
+        await loadTrend()
+      }).catch(() => {})
+    }
   } catch { /* empty */ }
   await loadTrend()
 })
