@@ -89,11 +89,16 @@ const columns = [
 
 const metricLabel = computed(() => metric.value === 'market_cap' ? '总市值(亿元)' : '份额(亿份)')
 
-const onResize = () => setTimeout(() => chart?.resize(), 200)
+const onResize = () => setTimeout(() => chart?.resize(), 100)
+let resizeObserver: ResizeObserver | null = null
 
 const renderChart = () => {
   if (!chartRef.value) return
-  if (!chart) chart = echarts.init(chartRef.value)
+  if (!chart) {
+    chart = echarts.init(chartRef.value)
+    resizeObserver = new ResizeObserver(onResize)
+    resizeObserver.observe(chartRef.value)
+  }
   chart.setOption({
     tooltip: { trigger: 'axis' },
     xAxis: { type: 'category', data: trendData.value.map(d => d.trade_date) },
@@ -152,6 +157,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('resize', onResize)
+  resizeObserver?.disconnect()
   if (pollTimer) clearInterval(pollTimer)
   chart?.dispose()
   chart = null

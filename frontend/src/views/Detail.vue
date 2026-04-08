@@ -60,7 +60,8 @@ const renderChart = () => {
   if (!chartRef.value) return
   if (!chart) {
     chart = echarts.init(chartRef.value)
-    window.addEventListener('resize', () => chart?.resize())
+    resizeObserver = new ResizeObserver(() => setTimeout(() => chart?.resize(), 100))
+    resizeObserver.observe(chartRef.value)
   }
   chart.setOption({
     tooltip: { trigger: 'axis' },
@@ -77,10 +78,9 @@ const loadTrend = async () => {
   renderChart()
 }
 
-const onResize = () => setTimeout(() => chart?.resize(), 200)
+let resizeObserver: ResizeObserver | null = null
 
 onMounted(async () => {
-  window.addEventListener('resize', onResize)
   const [sharesRes, fundsRes] = await Promise.all([
     getShares({ code, limit: 500 }),
     getFunds(),
@@ -94,7 +94,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  window.removeEventListener('resize', onResize)
+  resizeObserver?.disconnect()
   chart?.dispose()
   chart = null
 })
