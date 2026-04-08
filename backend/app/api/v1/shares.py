@@ -37,19 +37,19 @@ def query_shares(
 
 @router.get("/latest", response_model=ApiResponse)
 def latest_shares(db: Session = Depends(get_db)):
-    # 找到最新交易日
-    max_date = db.query(func.max(ETFShare.trade_date)).scalar()
-    if not max_date:
-        return ApiResponse(data=[])
-    rows = db.query(ETFShare, ETFFund.name, ETFFund.group_tag).join(
-        ETFFund, ETFShare.fund_code == ETFFund.code
-    ).filter(ETFShare.trade_date == max_date).all()
+    """每只追踪ETF各自的最新一条记录"""
+    from sqlalchemy import and_
+    funds = db.query(ETFFund).all()
     data = []
-    for share, name, group_tag in rows:
-        d = ShareOut.model_validate(share).model_dump()
-        d["name"] = name
-        d["group_tag"] = group_tag
-        data.append(d)
+    for fund in funds:
+        row = db.query(ETFShare).filter(
+            ETFShare.fund_code == fund.code
+        ).order_by(ETFShare.trade_date.desc()).first()
+        if row:
+            d = ShareOut.model_validate(row).model_dump()
+            d["name"] = fund.name
+            d["group_tag"] = fund.group_tag
+            data.append(d)
     return ApiResponse(data=data)
 
 
