@@ -94,7 +94,11 @@ const metricLabel = computed(() => metric.value === 'market_cap' ? '总市值(�
 
 const renderChart = () => {
   if (!chartRef.value) return
-  if (!chart) chart = echarts.init(chartRef.value)
+  if (!chart) {
+    chart = echarts.init(chartRef.value)
+    // 窗口大小变化时自动resize
+    window.addEventListener('resize', () => chart?.resize())
+  }
   chart.setOption({
     tooltip: { trigger: 'axis' },
     xAxis: { type: 'category', data: trendData.value.map(d => d.trade_date) },
@@ -138,9 +142,14 @@ onMounted(async () => {
     updateStatus.value = status?.update || { running: false, step: '', progress: '' }
 
     if (status && !status.is_up_to_date) {
-      triggerCollect().catch(() => {})
-      // 开始轮询状态
-      pollTimer = setInterval(pollStatus, 2000)
+      // 6小时内只自动触发一次
+      const COOLDOWN = 6 * 60 * 60 * 1000
+      const lastAuto = Number(localStorage.getItem('etf_last_auto_update') || '0')
+      if (Date.now() - lastAuto > COOLDOWN) {
+        localStorage.setItem('etf_last_auto_update', String(Date.now()))
+        triggerCollect().catch(() => {})
+        pollTimer = setInterval(pollStatus, 2000)
+      }
     }
   } catch { /* empty */ }
   await loadTrend()

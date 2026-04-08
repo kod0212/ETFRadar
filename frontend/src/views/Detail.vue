@@ -58,7 +58,10 @@ const columns = [
 
 const renderChart = () => {
   if (!chartRef.value) return
-  if (!chart) chart = echarts.init(chartRef.value)
+  if (!chart) {
+    chart = echarts.init(chartRef.value)
+    window.addEventListener('resize', () => chart?.resize())
+  }
   chart.setOption({
     tooltip: { trigger: 'axis' },
     xAxis: { type: 'category', data: trendData.value.map(d => d.trade_date) },
