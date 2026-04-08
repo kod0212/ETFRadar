@@ -54,7 +54,7 @@ const onCollect = async () => {
   try {
     const res = await triggerCollect()
     const d = res.data.data
-    message.success(`采集完成: ${d.fund_count} 只ETF`)
+    message.success(`采集完成: ${d.updated || d.fund_count || 0} 条数据`)
   } catch {
     message.error('采集失败')
   } finally {
