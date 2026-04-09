@@ -30,14 +30,18 @@
               {{ lookupResult.market === 'sh' ? '上海' : '深圳' }}
             </a-tag>
           </a-form-item>
+          <a-form-item label="分组">
+            <a-tag v-if="lookupResult.index_name" color="orange">{{ lookupResult.index_name }}</a-tag>
+            <span v-else style="color: #999">未分类</span>
+          </a-form-item>
           <a-form-item label="历史数据">
             <span v-if="lookupResult.has_history" style="color: #3f8600">
               ✓ 有 {{ lookupResult.history_count }} 天历史份额
             </span>
             <span v-else style="color: #999">暂无历史数据</span>
           </a-form-item>
-          <a-form-item label="分组">
-            <a-input v-model:value="groupTag" placeholder="可选，如：沪深300" />
+          <a-form-item label="标签">
+            <a-input v-model:value="tags" placeholder="可选，如：核心持仓,宽基" />
           </a-form-item>
         </template>
         <a-alert v-if="lookupError" :message="lookupError" type="error" show-icon style="margin-top: 8px" />
@@ -58,7 +62,7 @@ const inputCode = ref('')
 const looking = ref(false)
 const lookupResult = ref<any>(null)
 const lookupError = ref('')
-const groupTag = ref('')
+const tags = ref('')
 
 const columns = [
   { title: '代码', dataIndex: 'code', key: 'code', width: 100 },
@@ -104,13 +108,13 @@ const onAdd = async () => {
       code: lookupResult.value.code,
       name: lookupResult.value.name,
       market: lookupResult.value.market,
-      group_tag: groupTag.value || null,
+      tags: tags.value || null,
     })
     message.success(`已添加 ${lookupResult.value.name}`)
     showAdd.value = false
     inputCode.value = ''
     lookupResult.value = null
-    groupTag.value = ''
+    tags.value = ''
     await load()
   } catch (e: any) {
     message.error(e.response?.data?.detail || '添加失败')

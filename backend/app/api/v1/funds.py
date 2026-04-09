@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 import requests
 from app.api.deps import get_db
-from app.models.models import ETFFund, ETFShare
+from app.models.models import ETFFund, ETFShare, ETFDict
 from app.schemas.fund import FundCreate, FundUpdate, FundOut
 from app.schemas.common import ApiResponse
 
@@ -25,7 +25,8 @@ def lookup_fund(code: str = Query(..., description="6位基金代码"), db: Sess
     from app.models.models import ETFDict
     dict_entry = db.query(ETFDict).filter(ETFDict.code == code).first()
     if dict_entry:
-        info = {"code": code, "name": dict_entry.name, "market": dict_entry.market}
+        info = {"code": code, "name": dict_entry.name, "market": dict_entry.market,
+                "index_name": dict_entry.index_name}
     else:
         # 2. 回退腾讯接口
         info = _lookup_from_tencent(code)
@@ -68,11 +69,16 @@ def list_funds(group_tag: Optional[str] = None, db: Session = Depends(get_db)):
 def create_fund(body: FundCreate, db: Session = Depends(get_db)):
     if db.query(ETFFund).filter(ETFFund.code == body.code).first():
         raise HTTPException(400, f"ETF {body.code} 已存在")
-    fund = ETFFund(**body.model_dump())
+    # 自动从字典表获取分组
+    dict_entry = db.query(ETFDict).filter(ETFDict.code == body.code).first()
+    data = body.model_dump()
+    if dict_entry and dict_entry.index_name:
+        data["group_tag"] = dict_entry.index_name
+    fund = ETFFund(**data)
     db.add(fund)
     db.commit()
     db.refresh(fund)
-    logger.info(f"添加ETF: {fund.code} {fund.name}")
+    logger.info(f"添加ETF: {fund.code} {fund.name} 分组:{fund.group_tag}")
     return ApiResponse(data=FundOut.model_validate(fund))
 
 
