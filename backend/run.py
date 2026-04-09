@@ -25,6 +25,18 @@ def open_browser():
 
 
 if __name__ == "__main__":
+    # 检查是否被移出了安装目录
+    if getattr(sys, 'frozen', False):
+        exe_dir = os.path.dirname(sys.executable)
+        internal = os.path.join(exe_dir, "_internal")
+        if not os.path.exists(internal):
+            print("=" * 50)
+            print("  错误: 请勿将 ETFRadar.exe 移出安装目录!")
+            print("  请将整个 ETFRadar 文件夹一起移动。")
+            print("=" * 50)
+            input("按回车键退出...")
+            sys.exit(1)
+
     threading.Thread(target=open_browser, daemon=True).start()
     print("=" * 40)
     print("  ETF Radar starting...")
