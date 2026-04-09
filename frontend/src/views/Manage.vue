@@ -3,13 +3,22 @@
     <a-button type="primary" style="margin-bottom: 16px" @click="showAdd = true">添加ETF</a-button>
     <a-table :dataSource="funds" :columns="columns" rowKey="code" size="small">
       <template #bodyCell="{ column, record }">
+        <template v-if="column.key === 'tags'">
+          <a-space size="small" v-if="record.tags">
+            <a-tag v-for="t in record.tags.split(',')" :key="t" color="blue">{{ t }}</a-tag>
+          </a-space>
+          <span v-else style="color: #ccc">-</span>
+        </template>
         <template v-if="column.key === 'is_active'">
           <a-switch :checked="record.is_active" @change="(v: boolean) => onToggle(record.code, v)" />
         </template>
         <template v-if="column.key === 'action'">
-          <a-popconfirm title="确认删除?" @confirm="onDelete(record.code)">
-            <a-button type="link" danger size="small">删除</a-button>
-          </a-popconfirm>
+          <a-space size="small">
+            <a-button type="link" size="small" @click="openEditTags(record)">标签</a-button>
+            <a-popconfirm title="确认删除?" @confirm="onDelete(record.code)">
+              <a-button type="link" danger size="small">删除</a-button>
+            </a-popconfirm>
+          </a-space>
         </template>
       </template>
     </a-table>
@@ -47,6 +56,11 @@
         <a-alert v-if="lookupError" :message="lookupError" type="error" show-icon style="margin-top: 8px" />
       </a-form>
     </a-modal>
+
+    <a-modal v-model:open="showEditTags" title="编辑标签" @ok="onSaveTags">
+      <p>{{ editingFund?.name }} ({{ editingFund?.code }})</p>
+      <a-input v-model:value="editTagsValue" placeholder="多个标签用逗号分隔，如：核心持仓,宽基" />
+    </a-modal>
   </div>
 </template>
 
@@ -63,14 +77,32 @@ const looking = ref(false)
 const lookupResult = ref<any>(null)
 const lookupError = ref('')
 const tags = ref('')
+const showEditTags = ref(false)
+const editingFund = ref<any>(null)
+const editTagsValue = ref('')
+
+const openEditTags = (record: any) => {
+  editingFund.value = record
+  editTagsValue.value = record.tags || ''
+  showEditTags.value = true
+}
+
+const onSaveTags = async () => {
+  if (!editingFund.value) return
+  await updateFund(editingFund.value.code, { tags: editTagsValue.value || null })
+  message.success('标签已更新')
+  showEditTags.value = false
+  await load()
+}
 
 const columns = [
   { title: '代码', dataIndex: 'code', key: 'code', width: 100 },
   { title: '名称', dataIndex: 'name', key: 'name' },
   { title: '市场', dataIndex: 'market', key: 'market', width: 80 },
   { title: '分组', dataIndex: 'group_tag', key: 'group_tag', width: 100 },
+  { title: '标签', dataIndex: 'tags', key: 'tags', width: 150 },
   { title: '启用', key: 'is_active', width: 80 },
-  { title: '操作', key: 'action', width: 80 },
+  { title: '操作', key: 'action', width: 120 },
 ]
 
 const load = async () => {

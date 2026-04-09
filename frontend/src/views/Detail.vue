@@ -1,6 +1,11 @@
 <template>
   <div>
-    <a-page-header :title="`${fundName} (${code})`" :sub-title="latestDate ? `最新数据: ${latestDate}` : ''" @back="$router.push('/')" />
+    <a-page-header :title="`${fundName} (${code})`" :sub-title="latestDate ? `最新数据: ${latestDate}` : ''" @back="$router.push('/')">
+      <template #tags>
+        <a-tag v-if="fundGroup" color="orange">{{ fundGroup }}</a-tag>
+        <a-tag v-for="t in fundTags" :key="t" color="blue">{{ t }}</a-tag>
+      </template>
+    </a-page-header>
 
     <a-card title="趋势图" size="small" style="margin-bottom: 16px">
       <template #extra>
@@ -35,6 +40,8 @@ import { getShares, getSharesTrend, getFunds } from '../api'
 const route = useRoute()
 const code = route.params.code as string
 const fundName = ref(code)
+const fundGroup = ref('')
+const fundTags = ref<string[]>([])
 const shares = ref<any[]>([])
 const trendData = ref<any[]>([])
 const metric = ref('market_cap')
@@ -88,7 +95,11 @@ onMounted(async () => {
   shares.value = sharesRes.data.data || []
   const funds = fundsRes.data.data || []
   const fund = funds.find((f: any) => f.code === code)
-  if (fund) fundName.value = fund.name
+  if (fund) {
+    fundName.value = fund.name
+    fundGroup.value = fund.group_tag || ''
+    fundTags.value = fund.tags ? fund.tags.split(',').map((t: string) => t.trim()) : []
+  }
   if (shares.value.length > 0) latestDate.value = shares.value[0].trade_date
   await loadTrend()
 })

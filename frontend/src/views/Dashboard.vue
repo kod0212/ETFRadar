@@ -39,7 +39,13 @@
 
     <!-- 最新数据表格 -->
     <a-card title="最新份额数据" size="small">
-      <a-table :dataSource="latestData" :columns="columns" rowKey="fund_code"
+      <template #extra>
+        <a-select v-model:value="filterTag" style="width: 140px" size="small" allowClear placeholder="按标签筛选"
+                  @change="() => {}">
+          <a-select-option v-for="t in allTags" :key="t" :value="t">{{ t }}</a-select-option>
+        </a-select>
+      </template>
+      <a-table :dataSource="filteredData" :columns="columns" rowKey="fund_code"
                size="small" :pagination="false">
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'fund_code'">
@@ -49,6 +55,11 @@
             <span :style="{ color: record.change_shares > 0 ? '#cf1322' : record.change_shares < 0 ? '#3f8600' : '' }">
               {{ record.change_shares != null ? record.change_shares.toFixed(2) : '-' }}
             </span>
+          </template>
+          <template v-if="column.key === 'tags'">
+            <a-space size="small" v-if="record.tags">
+              <a-tag v-for="t in record.tags.split(',')" :key="t" size="small" color="blue">{{ t }}</a-tag>
+            </a-space>
           </template>
         </template>
       </a-table>
@@ -67,6 +78,7 @@ const selectedGroup = ref('沪深300')
 const metric = ref('market_cap')
 const lastCollectTime = ref('-')
 const updateStatus = ref({ running: false, step: '', progress: '' })
+const filterTag = ref<string | undefined>(undefined)
 const chartRef = ref<HTMLElement>()
 let chart: echarts.ECharts | null = null
 let pollTimer: any = null
@@ -74,6 +86,19 @@ let pollTimer: any = null
 const hs300TotalMcap = computed(() =>
   latestData.value.filter(d => d.group_tag === '沪深300').reduce((s, d) => s + (d.total_market_cap || 0), 0)
 )
+
+const allTags = computed(() => {
+  const tags = new Set<string>()
+  latestData.value.forEach(d => {
+    if (d.tags) d.tags.split(',').forEach((t: string) => tags.add(t.trim()))
+  })
+  return Array.from(tags).sort()
+})
+
+const filteredData = computed(() => {
+  if (!filterTag.value) return latestData.value
+  return latestData.value.filter(d => d.tags && d.tags.split(',').map((t: string) => t.trim()).includes(filterTag.value!))
+})
 
 const columns = [
   { title: '代码', dataIndex: 'fund_code', key: 'fund_code', width: 100 },
@@ -85,6 +110,7 @@ const columns = [
   { title: '份额(亿份)', dataIndex: 'shares', key: 'shares', width: 120,
     customRender: ({ text }: any) => text?.toFixed(2) },
   { title: '份额变化', dataIndex: 'change_shares', key: 'change_shares', width: 100 },
+  { title: '标签', dataIndex: 'tags', key: 'tags', width: 120 },
 ]
 
 const metricLabel = computed(() => metric.value === 'market_cap' ? '总市值(亿元)' : '份额(亿份)')
