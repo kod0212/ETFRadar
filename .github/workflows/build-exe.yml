@@ -41,6 +41,10 @@ jobs:
           cd backend
           python build_exe.py
 
+      - name: 复制使用说明
+        shell: bash
+        run: cp 使用说明.txt backend/dist/ETFRadar/
+
       - name: 获取版本号
         id: version
         shell: bash
@@ -82,6 +86,9 @@ jobs:
         run: |
           cd backend
           python build_exe.py
+
+      - name: 复制使用说明
+        run: cp 使用说明.txt backend/dist/ETFRadar/
 
       - name: 获取版本号
         id: version
