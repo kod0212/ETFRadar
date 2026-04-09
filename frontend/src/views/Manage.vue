@@ -87,7 +87,6 @@ const inputCode = ref('')
 const looking = ref(false)
 const lookupResult = ref<any>(null)
 const lookupError = ref('')
-const tags = ref('')
 const tagsList = ref<string[]>([])
 const newAddTagInput = ref('')
 
