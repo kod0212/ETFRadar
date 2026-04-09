@@ -268,9 +268,9 @@ def _background_fill_prices(start_date: str, tracked_codes: set, all_codes: set)
     try:
         dict_map = {d.code: d.market for d in db.query(ETFDict).all()}
 
+        # 查所有缺价格的ETF(不限日期,补全历史遗漏)
         no_price_codes = [r[0] for r in db.execute(
-            text("SELECT DISTINCT fund_code FROM etf_share WHERE price IS NULL AND trade_date >= :start"),
-            {"start": start_date}
+            text("SELECT DISTINCT fund_code FROM etf_share WHERE price IS NULL")
         ).fetchall()]
         # 排除已追踪的(阶段1已处理)
         no_price_codes = [c for c in no_price_codes if c not in tracked_codes]
