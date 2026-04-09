@@ -14,6 +14,10 @@
           <template #icon><SettingOutlined /></template>
           ETF管理
         </a-menu-item>
+        <a-menu-item key="help" @click="helpRef?.show()">
+          <template #icon><QuestionCircleOutlined /></template>
+          使用说明
+        </a-menu-item>
       </a-menu>
     </a-layout-sider>
     <a-layout>
@@ -28,20 +32,23 @@
       </a-layout-content>
     </a-layout>
   </a-layout>
+  <HelpModal ref="helpRef" />
 </template>
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { DashboardOutlined, SettingOutlined } from '@ant-design/icons-vue'
+import { DashboardOutlined, SettingOutlined, QuestionCircleOutlined } from '@ant-design/icons-vue'
 import { message } from 'ant-design-vue'
 import { triggerCollect } from './api'
+import HelpModal from './views/HelpModal.vue'
 
 const router = useRouter()
 const route = useRoute()
 const collapsed = ref(false)
 const collecting = ref(false)
 const version = ref('')
+const helpRef = ref()
 
 const currentRoute = computed(() => String(route.name || 'dashboard'))
 const pageTitle = computed(() => {
