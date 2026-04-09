@@ -50,8 +50,11 @@
             <span v-else style="color: #999">暂无历史数据</span>
           </a-form-item>
           <a-form-item label="标签">
-            <a-select v-model:value="tagsList" mode="tags" style="width: 100%"
-                      placeholder="输入标签后按回车添加" :token-separators="[',']" />
+            <div style="margin-bottom: 8px; min-height: 24px">
+              <a-tag v-for="(t, i) in tagsList" :key="i" color="blue" closable @close="tagsList.splice(i, 1)">{{ t }}</a-tag>
+            </div>
+            <a-input-search v-model:value="newAddTagInput" placeholder="输入标签名称" enter-button="添加"
+                            @search="onAddNewTag" />
           </a-form-item>
         </template>
         <a-alert v-if="lookupError" :message="lookupError" type="error" show-icon style="margin-top: 8px" />
@@ -59,9 +62,15 @@
     </a-modal>
 
     <a-modal v-model:open="showEditTags" title="编辑标签" @ok="onSaveTags">
-      <p>{{ editingFund?.name }} ({{ editingFund?.code }})</p>
-      <a-select v-model:value="editTagsList" mode="tags" style="width: 100%"
-                placeholder="输入标签后按回车添加" :token-separators="[',']" />
+      <p style="margin-bottom: 12px">{{ editingFund?.name }} ({{ editingFund?.code }})</p>
+      <div style="margin-bottom: 12px; min-height: 32px">
+        <a-tag v-for="(t, i) in editTagsList" :key="i" color="blue" closable @close="editTagsList.splice(i, 1)">
+          {{ t }}
+        </a-tag>
+        <span v-if="!editTagsList.length" style="color: #ccc">暂无标签</span>
+      </div>
+      <a-input-search v-model:value="newTagInput" placeholder="输入标签名称" enter-button="添加"
+                      @search="onAddTag" />
     </a-modal>
   </div>
 </template>
@@ -80,14 +89,33 @@ const lookupResult = ref<any>(null)
 const lookupError = ref('')
 const tags = ref('')
 const tagsList = ref<string[]>([])
+const newAddTagInput = ref('')
+
+const onAddNewTag = () => {
+  const tag = newAddTagInput.value.trim()
+  if (tag && !tagsList.value.includes(tag)) {
+    tagsList.value.push(tag)
+  }
+  newAddTagInput.value = ''
+}
 const showEditTags = ref(false)
 const editingFund = ref<any>(null)
 const editTagsList = ref<string[]>([])
+const newTagInput = ref('')
 
 const openEditTags = (record: any) => {
   editingFund.value = record
   editTagsList.value = record.tags ? record.tags.split(',').map((t: string) => t.trim()).filter(Boolean) : []
+  newTagInput.value = ''
   showEditTags.value = true
+}
+
+const onAddTag = () => {
+  const tag = newTagInput.value.trim()
+  if (tag && !editTagsList.value.includes(tag)) {
+    editTagsList.value.push(tag)
+  }
+  newTagInput.value = ''
 }
 
 const onSaveTags = async () => {
@@ -150,6 +178,7 @@ const onAdd = async () => {
     inputCode.value = ''
     lookupResult.value = null
     tagsList.value = []
+    newAddTagInput.value = ''
     await load()
   } catch (e: any) {
     message.error(e.response?.data?.detail || '添加失败')
