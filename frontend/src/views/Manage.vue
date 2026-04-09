@@ -50,7 +50,8 @@
             <span v-else style="color: #999">暂无历史数据</span>
           </a-form-item>
           <a-form-item label="标签">
-            <a-input v-model:value="tags" placeholder="可选，如：核心持仓,宽基" />
+            <a-select v-model:value="tagsList" mode="tags" style="width: 100%"
+                      placeholder="输入标签后按回车添加" :token-separators="[',']" />
           </a-form-item>
         </template>
         <a-alert v-if="lookupError" :message="lookupError" type="error" show-icon style="margin-top: 8px" />
@@ -59,7 +60,8 @@
 
     <a-modal v-model:open="showEditTags" title="编辑标签" @ok="onSaveTags">
       <p>{{ editingFund?.name }} ({{ editingFund?.code }})</p>
-      <a-input v-model:value="editTagsValue" placeholder="多个标签用逗号分隔，如：核心持仓,宽基" />
+      <a-select v-model:value="editTagsList" mode="tags" style="width: 100%"
+                placeholder="输入标签后按回车添加" :token-separators="[',']" />
     </a-modal>
   </div>
 </template>
@@ -77,19 +79,20 @@ const looking = ref(false)
 const lookupResult = ref<any>(null)
 const lookupError = ref('')
 const tags = ref('')
+const tagsList = ref<string[]>([])
 const showEditTags = ref(false)
 const editingFund = ref<any>(null)
-const editTagsValue = ref('')
+const editTagsList = ref<string[]>([])
 
 const openEditTags = (record: any) => {
   editingFund.value = record
-  editTagsValue.value = record.tags || ''
+  editTagsList.value = record.tags ? record.tags.split(',').map((t: string) => t.trim()).filter(Boolean) : []
   showEditTags.value = true
 }
 
 const onSaveTags = async () => {
   if (!editingFund.value) return
-  await updateFund(editingFund.value.code, { tags: editTagsValue.value || null })
+  await updateFund(editingFund.value.code, { tags: editTagsList.value.join(',') || null })
   message.success('标签已更新')
   showEditTags.value = false
   await load()
@@ -140,13 +143,13 @@ const onAdd = async () => {
       code: lookupResult.value.code,
       name: lookupResult.value.name,
       market: lookupResult.value.market,
-      tags: tags.value || null,
+      tags: tagsList.value.join(',') || null,
     })
     message.success(`已添加 ${lookupResult.value.name}`)
     showAdd.value = false
     inputCode.value = ''
     lookupResult.value = null
-    tags.value = ''
+    tagsList.value = []
     await load()
   } catch (e: any) {
     message.error(e.response?.data?.detail || '添加失败')
