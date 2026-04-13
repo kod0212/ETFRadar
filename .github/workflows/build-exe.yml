@@ -45,16 +45,27 @@ jobs:
         shell: bash
         run: cp 使用说明.txt backend/dist/ETFRadar/
 
+      - name: 生成更新包
+        run: |
+          cd backend
+          python build_update_pack.py
+
       - name: 获取版本号
         id: version
         shell: bash
         run: echo "ver=$(grep 'VERSION' backend/app/core/config.py | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')" >> $GITHUB_OUTPUT
 
-      - name: 上传产物
+      - name: 上传完整包
         uses: actions/upload-artifact@v4
         with:
           name: ETFRadar-Windows-v${{ steps.version.outputs.ver }}
           path: backend/dist/ETFRadar/
+
+      - name: 上传更新包
+        uses: actions/upload-artifact@v4
+        with:
+          name: etf-radar-update-v${{ steps.version.outputs.ver }}
+          path: backend/dist/etf-radar-update.zip
 
   build-mac:
     runs-on: macos-latest
@@ -94,7 +105,7 @@ jobs:
         id: version
         run: echo "ver=$(grep 'VERSION' backend/app/core/config.py | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')" >> $GITHUB_OUTPUT
 
-      - name: 上传产物
+      - name: 上传完整包
         uses: actions/upload-artifact@v4
         with:
           name: ETFRadar-Mac-v${{ steps.version.outputs.ver }}
