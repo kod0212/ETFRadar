@@ -9,6 +9,9 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+permissions:
+  contents: write  # 需要写权限来创建Release
+
 jobs:
   build:
     runs-on: windows-latest
@@ -137,8 +140,9 @@ jobs:
           name: ETFRadar-Mac-v${{ steps.version.outputs.ver }}
           path: backend/dist/ETFRadar/
 
-      - name: 发布 Release
+      - name: 发布 Release (Mac)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
+          append_body: true
           files: backend/dist/ETFRadar-Mac-v${{ steps.version.outputs.ver }}.zip
