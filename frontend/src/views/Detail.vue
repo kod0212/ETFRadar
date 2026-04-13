@@ -9,10 +9,13 @@
 
     <a-card title="趋势图" size="small" style="margin-bottom: 16px">
       <template #extra>
-        <a-radio-group v-model:value="metric" size="small" @change="loadTrend">
-          <a-radio-button value="market_cap">总市值</a-radio-button>
-          <a-radio-button value="shares">份额</a-radio-button>
-        </a-radio-group>
+        <a-space>
+          <a-segmented v-model:value="dateRange" :options="dateRangeOptions" size="small" @change="loadTrend" />
+          <a-radio-group v-model:value="metric" size="small" @change="loadTrend">
+            <a-radio-button value="market_cap">总市值</a-radio-button>
+            <a-radio-button value="shares">份额</a-radio-button>
+          </a-radio-group>
+        </a-space>
       </template>
       <div ref="chartRef" style="width: 100%; height: 360px"></div>
     </a-card>
@@ -45,6 +48,14 @@ const fundTags = ref<string[]>([])
 const shares = ref<any[]>([])
 const trendData = ref<any[]>([])
 const metric = ref('market_cap')
+const dateRange = ref('all')
+const dateRangeOptions = [
+  { label: '1月', value: '1m' },
+  { label: '3月', value: '3m' },
+  { label: '6月', value: '6m' },
+  { label: '1年', value: '1y' },
+  { label: '全部', value: 'all' },
+]
 const latestDate = ref('')
 const chartRef = ref<HTMLElement>()
 let chart: echarts.ECharts | null = null
@@ -80,7 +91,14 @@ const renderChart = () => {
 }
 
 const loadTrend = async () => {
-  const res = await getSharesTrend({ code, metric: metric.value })
+  const params: any = { code, metric: metric.value }
+  const daysMap: Record<string, number> = { '1m': 30, '3m': 90, '6m': 180, '1y': 365 }
+  if (daysMap[dateRange.value]) {
+    const d = new Date()
+    d.setDate(d.getDate() - daysMap[dateRange.value])
+    params.start = d.toISOString().slice(0, 10)
+  }
+  const res = await getSharesTrend(params)
   trendData.value = res.data.data || []
   renderChart()
 }

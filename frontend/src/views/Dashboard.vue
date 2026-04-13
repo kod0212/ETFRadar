@@ -49,6 +49,9 @@
 
     <!-- 最新数据表格 -->
     <a-card :title="`最新份额数据${filterLabel ? ' — ' + filterLabel : ''}`" size="small">
+      <template #extra>
+        <a-input-search v-model:value="searchText" placeholder="搜索代码或名称" style="width: 200px" size="small" allowClear />
+      </template>
       <a-table :dataSource="filteredData" :columns="columns" rowKey="fund_code"
                size="small" :loading="loading" :pagination="{ pageSize: 50, showSizeChanger: true, pageSizeOptions: ['20','50','100'], showTotal: (t: number) => `共 ${t} 只` }">
         <template #emptyText>
@@ -57,6 +60,9 @@
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'fund_code'">
             <a @click="$router.push(`/detail/${record.fund_code}`)">{{ record.fund_code }}</a>
+          </template>
+          <template v-if="column.key === 'name'">
+            <a @click="$router.push(`/detail/${record.fund_code}`)">{{ record.name }}</a>
           </template>
           <template v-if="column.key === 'change_shares'">
             <span :style="{ color: record.change_shares > 0 ? '#cf1322' : record.change_shares < 0 ? '#3f8600' : '' }">
@@ -88,6 +94,7 @@ const updateStatus = ref({ running: false, step: '', progress: '' })
 const filterKey = ref('__all__')
 const chartRef = ref<HTMLElement>()
 const loading = ref(true)
+const searchText = ref('')
 let chart: echarts.ECharts | null = null
 let pollTimer: any = null
 
@@ -130,8 +137,15 @@ const allFilterTags = computed(() => {
 
 // 筛选后的数据
 const filteredData = computed(() => {
-  if (filterType.value === 'all') return latestData.value
-  return latestData.value.filter(d => getAllTagsForItem(d).includes(filterValue.value))
+  let data = latestData.value
+  if (filterType.value !== 'all') {
+    data = data.filter(d => getAllTagsForItem(d).includes(filterValue.value))
+  }
+  if (searchText.value) {
+    const kw = searchText.value.toLowerCase()
+    data = data.filter(d => d.fund_code.includes(kw) || (d.name || '').toLowerCase().includes(kw))
+  }
+  return data
 })
 
 const summaryMcap = computed(() =>
@@ -145,7 +159,7 @@ const chartTitle = computed(() => {
 
 const columns = [
   { title: '代码', dataIndex: 'fund_code', key: 'fund_code', width: 100 },
-  { title: '名称', dataIndex: 'name', key: 'name' },
+  { title: '名称', dataIndex: 'name', key: 'name', ellipsis: true },
   { title: '最新价', dataIndex: 'price', key: 'price', width: 100,
     sorter: (a: any, b: any) => (a.price || 0) - (b.price || 0) },
   { title: '总市值(亿)', dataIndex: 'total_market_cap', key: 'total_market_cap', width: 120,
