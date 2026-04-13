@@ -3,11 +3,12 @@
     <a-button type="primary" style="margin-bottom: 16px" @click="showAdd = true">添加ETF</a-button>
     <a-table :dataSource="funds" :columns="columns" rowKey="code" size="small">
       <template #bodyCell="{ column, record }">
-        <template v-if="column.key === 'tags'">
-          <a-space size="small" v-if="record.tags">
-            <a-tag v-for="t in record.tags.split(',')" :key="t" color="blue">{{ t }}</a-tag>
+        <template v-if="column.key === 'all_tags'">
+          <a-space size="small" wrap>
+            <a-tag v-for="t in (record.sys_tags||'').split(',').filter(Boolean)" :key="'s'+t" color="orange">{{ t }}</a-tag>
+            <a-tag v-for="t in (record.tags||'').split(',').filter(Boolean)" :key="'u'+t" color="blue">{{ t }}</a-tag>
           </a-space>
-          <span v-else style="color: #ccc">-</span>
+          <span v-if="!record.sys_tags && !record.tags" style="color: #ccc">-</span>
         </template>
         <template v-if="column.key === 'is_active'">
           <a-switch :checked="record.is_active" @change="(v: boolean) => onToggle(record.code, v)" />
@@ -39,9 +40,11 @@
               {{ lookupResult.market === 'sh' ? '上海' : '深圳' }}
             </a-tag>
           </a-form-item>
-          <a-form-item label="分组">
-            <a-tag v-if="lookupResult.index_name" color="orange">{{ lookupResult.index_name }}</a-tag>
-            <span v-else style="color: #999">未分类</span>
+          <a-form-item label="系统标签">
+            <a-space v-if="lookupResult.auto_tags">
+              <a-tag v-for="t in lookupResult.auto_tags.split(',')" :key="t" color="orange">{{ t }}</a-tag>
+            </a-space>
+            <span v-else style="color: #999">无</span>
           </a-form-item>
           <a-form-item label="历史数据">
             <span v-if="lookupResult.has_history" style="color: #3f8600">
@@ -129,8 +132,7 @@ const columns = [
   { title: '代码', dataIndex: 'code', key: 'code', width: 100 },
   { title: '名称', dataIndex: 'name', key: 'name' },
   { title: '市场', dataIndex: 'market', key: 'market', width: 80 },
-  { title: '分组', dataIndex: 'group_tag', key: 'group_tag', width: 100 },
-  { title: '标签', dataIndex: 'tags', key: 'tags', width: 150 },
+  { title: '标签', key: 'all_tags', width: 250 },
   { title: '启用', key: 'is_active', width: 80 },
   { title: '操作', key: 'action', width: 120 },
 ]

@@ -49,6 +49,7 @@ def latest_shares(db: Session = Depends(get_db)):
             d = ShareOut.model_validate(row).model_dump()
             d["name"] = fund.name
             d["group_tag"] = fund.group_tag
+            d["sys_tags"] = fund.sys_tags
             d["tags"] = fund.tags
             data.append(d)
     return ApiResponse(data=data)

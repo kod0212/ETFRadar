@@ -13,6 +13,7 @@ class ETFFund(Base):
     index_name = Column(String(50))
     group_tag = Column(String(50))
     tags = Column(String(200))  # 用户自定义标签,逗号分隔
+    sys_tags = Column(String(200))  # 系统自动标签,逗号分隔
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
@@ -43,7 +44,8 @@ class ETFDict(Base):
     code = Column(String(10), primary_key=True)
     name = Column(String(100), nullable=False)
     market = Column(String(2), nullable=False)
-    index_name = Column(String(50))  # 跟踪指数/分组
+    index_name = Column(String(50))
+    auto_tags = Column(String(200))  # 系统自动标签
 
 
 class CollectLog(Base):

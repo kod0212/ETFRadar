@@ -25,6 +25,7 @@ class FundOut(BaseModel):
     market: str
     index_name: Optional[str]
     group_tag: Optional[str]
+    sys_tags: Optional[str]
     tags: Optional[str]
     is_active: bool
 

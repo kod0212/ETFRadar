@@ -26,7 +26,8 @@ def lookup_fund(code: str = Query(..., description="6位基金代码"), db: Sess
     dict_entry = db.query(ETFDict).filter(ETFDict.code == code).first()
     if dict_entry:
         info = {"code": code, "name": dict_entry.name, "market": dict_entry.market,
-                "index_name": dict_entry.index_name}
+                "index_name": dict_entry.index_name,
+                "auto_tags": dict_entry.auto_tags}
     else:
         # 2. 回退腾讯接口
         info = _lookup_from_tencent(code)
@@ -72,8 +73,11 @@ def create_fund(body: FundCreate, db: Session = Depends(get_db)):
     # 自动从字典表获取分组
     dict_entry = db.query(ETFDict).filter(ETFDict.code == body.code).first()
     data = body.model_dump()
-    if dict_entry and dict_entry.index_name:
-        data["group_tag"] = dict_entry.index_name
+    if dict_entry:
+        if dict_entry.index_name:
+            data["group_tag"] = dict_entry.index_name
+        if dict_entry.auto_tags:
+            data["sys_tags"] = dict_entry.auto_tags
     fund = ETFFund(**data)
     db.add(fund)
     db.commit()
