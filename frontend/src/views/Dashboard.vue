@@ -8,25 +8,26 @@
     <!-- 指标卡片 -->
     <a-row :gutter="16" style="margin-bottom: 24px">
       <a-col :span="8">
-        <a-statistic title="追踪ETF数" :value="latestData.length" />
+        <a-statistic title="追踪ETF数" :value="filteredData.length" :suffix="filterTag ? `/ ${latestData.length}` : ''" />
       </a-col>
       <a-col :span="8">
         <a-statistic title="数据最新日期" :value="lastCollectTime" />
       </a-col>
       <a-col :span="8">
-        <a-statistic title="沪深300合计市值(亿元)" :value="hs300TotalMcap" :precision="2" />
+        <a-statistic :title="filterTag ? '筛选合计市值(亿元)' : '沪深300合计市值(亿元)'"
+                     :value="summaryMcap" :precision="2" />
       </a-col>
     </a-row>
 
     <!-- 趋势图 -->
-    <a-card title="趋势图" style="margin-bottom: 24px" size="small">
+    <a-card :title="chartTitle" style="margin-bottom: 24px" size="small">
       <template #extra>
         <a-space>
           <a-radio-group v-model:value="metric" size="small" @change="loadTrend">
             <a-radio-button value="market_cap">总市值</a-radio-button>
             <a-radio-button value="shares">份额</a-radio-button>
           </a-radio-group>
-          <a-radio-group v-model:value="selectedGroup" size="small" @change="loadTrend">
+          <a-radio-group v-if="!filterTag" v-model:value="selectedGroup" size="small" @change="loadTrend">
             <a-radio-button value="沪深300">沪深300</a-radio-button>
             <a-radio-button value="中证500">中证500</a-radio-button>
             <a-radio-button value="上证50">上证50</a-radio-button>
@@ -40,8 +41,8 @@
     <!-- 最新数据表格 -->
     <a-card title="最新份额数据" size="small">
       <template #extra>
-        <a-select v-model:value="filterTag" style="width: 140px" size="small" allowClear placeholder="按标签筛选"
-                  @change="() => {}">
+        <a-select v-model:value="filterTag" style="width: 160px" size="small" allowClear placeholder="按标签筛选"
+                  @change="onFilterChange">
           <a-select-option v-for="t in allTags" :key="t" :value="t">{{ t }}</a-select-option>
         </a-select>
       </template>
@@ -83,10 +84,6 @@ const chartRef = ref<HTMLElement>()
 let chart: echarts.ECharts | null = null
 let pollTimer: any = null
 
-const hs300TotalMcap = computed(() =>
-  latestData.value.filter(d => d.group_tag === '沪深300').reduce((s, d) => s + (d.total_market_cap || 0), 0)
-)
-
 const allTags = computed(() => {
   const tags = new Set<string>()
   latestData.value.forEach(d => {
@@ -98,6 +95,16 @@ const allTags = computed(() => {
 const filteredData = computed(() => {
   if (!filterTag.value) return latestData.value
   return latestData.value.filter(d => d.tags && d.tags.split(',').map((t: string) => t.trim()).includes(filterTag.value!))
+})
+
+const summaryMcap = computed(() => {
+  const list = filterTag.value ? filteredData.value : latestData.value.filter(d => d.group_tag === '沪深300')
+  return list.reduce((s, d) => s + (d.total_market_cap || 0), 0)
+})
+
+const chartTitle = computed(() => {
+  if (filterTag.value) return `标签「${filterTag.value}」趋势图`
+  return `${selectedGroup.value} 趋势图`
 })
 
 const columns = [
@@ -136,10 +143,24 @@ const renderChart = () => {
 
 const loadTrend = async () => {
   try {
-    const res = await getSharesTrend({ group: selectedGroup.value, metric: metric.value })
+    let params: any = { metric: metric.value }
+    if (filterTag.value) {
+      // 标签筛选模式：用筛选后的ETF代码列表
+      const codes = filteredData.value.map(d => d.fund_code).join(',')
+      if (!codes) return
+      params.codes = codes
+    } else {
+      // 分组模式
+      params.group = selectedGroup.value
+    }
+    const res = await getSharesTrend(params)
     trendData.value = res.data.data || []
     renderChart()
   } catch { /* empty */ }
+}
+
+const onFilterChange = () => {
+  loadTrend()
 }
 
 const pollStatus = async () => {
@@ -166,13 +187,12 @@ onMounted(async () => {
     latestData.value = latestRes.data.data || []
     const status = statusRes.data.data
     lastCollectTime.value = status?.latest_date || '-'
+    updateStatus.value = status?.update || { running: false, step: '', progress: '' }
 
-    // 自动更新（后端控制6小时冷却）
     if (status && !status.is_up_to_date) {
       triggerCollect(false).then(res => {
         const d = res.data.data
         if (d.status === 'cooldown' || d.status === 'up_to_date') return
-        // 真正开始更新了，轮询状态
         updateStatus.value = { running: true, step: '准备更新...', progress: '' }
         pollTimer = setInterval(pollStatus, 2000)
       }).catch(() => {})
