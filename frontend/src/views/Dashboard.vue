@@ -8,13 +8,14 @@
     <!-- 指标卡片 -->
     <a-row :gutter="16" style="margin-bottom: 24px">
       <a-col :span="8">
-        <a-statistic title="追踪ETF数" :value="filteredData.length" :suffix="filterTag ? `/ ${latestData.length}` : ''" />
+        <a-statistic :title="filterLabel ? `筛选ETF数` : '追踪ETF数'"
+                     :value="filteredData.length" :suffix="filterLabel ? `/ ${latestData.length}` : ''" />
       </a-col>
       <a-col :span="8">
         <a-statistic title="数据最新日期" :value="lastCollectTime" />
       </a-col>
       <a-col :span="8">
-        <a-statistic :title="filterTag ? '筛选合计市值(亿元)' : '沪深300合计市值(亿元)'"
+        <a-statistic :title="filterLabel ? '筛选合计市值(亿元)' : '全部合计市值(亿元)'"
                      :value="summaryMcap" :precision="2" />
       </a-col>
     </a-row>
@@ -27,25 +28,26 @@
             <a-radio-button value="market_cap">总市值</a-radio-button>
             <a-radio-button value="shares">份额</a-radio-button>
           </a-radio-group>
-          <a-radio-group v-if="!filterTag" v-model:value="selectedGroup" size="small" @change="loadTrend">
-            <a-radio-button value="沪深300">沪深300</a-radio-button>
-            <a-radio-button value="中证500">中证500</a-radio-button>
-            <a-radio-button value="上证50">上证50</a-radio-button>
-            <a-radio-button value="创业板">创业板</a-radio-button>
-          </a-radio-group>
+          <a-select v-model:value="filterKey" style="width: 180px" size="small" @change="onFilterChange">
+            <a-select-option value="__all__">全部追踪ETF</a-select-option>
+            <a-select-opt-group label="按分组">
+              <a-select-option v-for="g in allGroups" :key="'g:'+g.name" :value="'g:'+g.name">
+                {{ g.name }} ({{ g.count }}只)
+              </a-select-option>
+            </a-select-opt-group>
+            <a-select-opt-group v-if="allTags.length" label="按标签">
+              <a-select-option v-for="t in allTags" :key="'t:'+t.name" :value="'t:'+t.name">
+                {{ t.name }} ({{ t.count }}只)
+              </a-select-option>
+            </a-select-opt-group>
+          </a-select>
         </a-space>
       </template>
       <div ref="chartRef" style="width: 100%; height: 360px"></div>
     </a-card>
 
     <!-- 最新数据表格 -->
-    <a-card title="最新份额数据" size="small">
-      <template #extra>
-        <a-select v-model:value="filterTag" style="width: 160px" size="small" allowClear placeholder="按标签筛选"
-                  @change="onFilterChange">
-          <a-select-option v-for="t in allTags" :key="t" :value="t">{{ t }}</a-select-option>
-        </a-select>
-      </template>
+    <a-card :title="`最新份额数据${filterLabel ? ' — ' + filterLabel : ''}`" size="small">
       <a-table :dataSource="filteredData" :columns="columns" rowKey="fund_code"
                size="small" :pagination="false">
         <template #bodyCell="{ column, record }">
@@ -75,36 +77,62 @@ import { getLatestShares, getSharesTrend, getCollectStatus, triggerCollect } fro
 
 const latestData = ref<any[]>([])
 const trendData = ref<any[]>([])
-const selectedGroup = ref('沪深300')
 const metric = ref('market_cap')
 const lastCollectTime = ref('-')
 const updateStatus = ref({ running: false, step: '', progress: '' })
-const filterTag = ref<string | undefined>(undefined)
+const filterKey = ref('__all__')  // __all__ | g:沪深300 | t:核心持仓
 const chartRef = ref<HTMLElement>()
 let chart: echarts.ECharts | null = null
 let pollTimer: any = null
 
-const allTags = computed(() => {
-  const tags = new Set<string>()
+// 解析筛选key
+const filterType = computed(() => {
+  if (filterKey.value === '__all__') return 'all'
+  return filterKey.value.startsWith('g:') ? 'group' : 'tag'
+})
+const filterValue = computed(() => filterKey.value.replace(/^[gt]:/, ''))
+const filterLabel = computed(() => {
+  if (filterType.value === 'all') return ''
+  if (filterType.value === 'group') return `分组: ${filterValue.value}`
+  return `标签: ${filterValue.value}`
+})
+
+// 分组列表(带数量)
+const allGroups = computed(() => {
+  const map: Record<string, number> = {}
   latestData.value.forEach(d => {
-    if (d.tags) d.tags.split(',').forEach((t: string) => tags.add(t.trim()))
+    if (d.group_tag) map[d.group_tag] = (map[d.group_tag] || 0) + 1
   })
-  return Array.from(tags).sort()
+  return Object.entries(map).sort().map(([name, count]) => ({ name, count }))
 })
 
+// 标签列表(带数量)
+const allTags = computed(() => {
+  const map: Record<string, number> = {}
+  latestData.value.forEach(d => {
+    if (d.tags) d.tags.split(',').forEach((t: string) => {
+      const tag = t.trim()
+      if (tag) map[tag] = (map[tag] || 0) + 1
+    })
+  })
+  return Object.entries(map).sort().map(([name, count]) => ({ name, count }))
+})
+
+// 筛选后的数据
 const filteredData = computed(() => {
-  if (!filterTag.value) return latestData.value
-  return latestData.value.filter(d => d.tags && d.tags.split(',').map((t: string) => t.trim()).includes(filterTag.value!))
+  if (filterType.value === 'all') return latestData.value
+  if (filterType.value === 'group') return latestData.value.filter(d => d.group_tag === filterValue.value)
+  return latestData.value.filter(d => d.tags && d.tags.split(',').map((t: string) => t.trim()).includes(filterValue.value))
 })
 
-const summaryMcap = computed(() => {
-  const list = filterTag.value ? filteredData.value : latestData.value.filter(d => d.group_tag === '沪深300')
-  return list.reduce((s, d) => s + (d.total_market_cap || 0), 0)
-})
+const summaryMcap = computed(() =>
+  filteredData.value.reduce((s, d) => s + (d.total_market_cap || 0), 0)
+)
 
 const chartTitle = computed(() => {
-  if (filterTag.value) return `标签「${filterTag.value}」趋势图`
-  return `${selectedGroup.value} 趋势图`
+  if (filterType.value === 'group') return `${filterValue.value} 趋势图`
+  if (filterType.value === 'tag') return `标签「${filterValue.value}」趋势图`
+  return '全部追踪ETF趋势图'
 })
 
 const columns = [
@@ -143,15 +171,14 @@ const renderChart = () => {
 
 const loadTrend = async () => {
   try {
-    let params: any = { metric: metric.value }
-    if (filterTag.value) {
-      // 标签筛选模式：用筛选后的ETF代码列表
+    const params: any = { metric: metric.value }
+    if (filterType.value === 'group') {
+      params.group = filterValue.value
+    } else {
+      // all 或 tag: 用codes参数
       const codes = filteredData.value.map(d => d.fund_code).join(',')
       if (!codes) return
       params.codes = codes
-    } else {
-      // 分组模式
-      params.group = selectedGroup.value
     }
     const res = await getSharesTrend(params)
     trendData.value = res.data.data || []
@@ -159,9 +186,7 @@ const loadTrend = async () => {
   } catch { /* empty */ }
 }
 
-const onFilterChange = () => {
-  loadTrend()
-}
+const onFilterChange = () => loadTrend()
 
 const pollStatus = async () => {
   try {
@@ -181,7 +206,6 @@ const pollStatus = async () => {
 
 onMounted(async () => {
   window.addEventListener('resize', onResize)
-
   try {
     const [latestRes, statusRes] = await Promise.all([getLatestShares(), getCollectStatus()])
     latestData.value = latestRes.data.data || []
