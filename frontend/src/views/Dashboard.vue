@@ -24,6 +24,7 @@
     <a-card :title="chartTitle" style="margin-bottom: 24px; position: relative" size="small">
       <template #extra>
         <a-space>
+          <a-segmented v-model:value="dateRange" :options="[{label:'1月',value:'1m'},{label:'3月',value:'3m'},{label:'6月',value:'6m'},{label:'1年',value:'1y'},{label:'全部',value:'all'}]" size="small" @change="loadTrend" />
           <a-radio-group v-model:value="metric" size="small" @change="loadTrend">
             <a-radio-button value="market_cap">总市值</a-radio-button>
             <a-radio-button value="shares">份额</a-radio-button>
@@ -95,6 +96,7 @@ const filterKey = ref('__all__')
 const chartRef = ref<HTMLElement>()
 const loading = ref(true)
 const searchText = ref('')
+const dateRange = ref('1y')
 let chart: echarts.ECharts | null = null
 let pollTimer: any = null
 
@@ -201,6 +203,12 @@ const loadTrend = async () => {
     const codes = filteredData.value.map(d => d.fund_code).join(',')
     if (!codes) return
     params.codes = codes
+    const daysMap: Record<string, number> = { '1m': 30, '3m': 90, '6m': 180, '1y': 365 }
+    if (daysMap[dateRange.value]) {
+      const d = new Date()
+      d.setDate(d.getDate() - daysMap[dateRange.value])
+      params.start = d.toISOString().slice(0, 10)
+    }
     const res = await getSharesTrend(params)
     trendData.value = res.data.data || []
     renderChart()
