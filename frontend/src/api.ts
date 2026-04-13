@@ -3,8 +3,7 @@ import axios from 'axios'
 const api = axios.create({ baseURL: '/api/v1' })
 
 // ETF管理
-export const getFunds = (group?: string) =>
-  api.get('/funds', { params: group ? { group_tag: group } : {} })
+export const getFunds = () => api.get('/funds')
 
 export const lookupFund = (code: string) => api.get('/funds/lookup', { params: { code } })
 export const createFund = (data: any) => api.post('/funds', data)
