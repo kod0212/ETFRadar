@@ -1,13 +1,16 @@
-name: 打包 exe
+name: 打包并发布
 
 on:
-  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'  # 推送tag时自动触发
+  workflow_dispatch:  # 也支持手动触发
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  build-windows:
+  build:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,6 +22,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: 获取版本号
+        id: version
+        shell: bash
+        run: echo "ver=$(grep 'VERSION' backend/app/core/config.py | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')" >> $GITHUB_OUTPUT
 
       - name: 构建前端
         run: |
@@ -41,31 +49,44 @@ jobs:
           cd backend
           python build_exe.py
 
-      - name: 复制使用说明
-        shell: bash
-        run: cp 使用说明.txt backend/dist/ETFRadar/
-
       - name: 生成更新包
         run: |
           cd backend
           python build_update_pack.py
 
-      - name: 获取版本号
-        id: version
+      - name: 复制使用说明
         shell: bash
-        run: echo "ver=$(grep 'VERSION' backend/app/core/config.py | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')" >> $GITHUB_OUTPUT
+        run: cp 使用说明.txt backend/dist/ETFRadar/
 
-      - name: 上传完整包
+      - name: 打包zip
+        shell: bash
+        run: |
+          cd backend/dist
+          7z a ETFRadar-Windows-v${{ steps.version.outputs.ver }}.zip ETFRadar/
+
+      - name: 上传完整包(Artifact)
         uses: actions/upload-artifact@v4
         with:
           name: ETFRadar-Windows-v${{ steps.version.outputs.ver }}
           path: backend/dist/ETFRadar/
 
-      - name: 上传更新包
-        uses: actions/upload-artifact@v4
+      - name: 发布 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
         with:
-          name: etf-radar-update-v${{ steps.version.outputs.ver }}
-          path: backend/dist/etf-radar-update.zip
+          name: v${{ steps.version.outputs.ver }}
+          body: |
+            ## ETF雷达 v${{ steps.version.outputs.ver }}
+
+            ### 下载
+            - **首次安装**: 下载 `ETFRadar-Windows-v${{ steps.version.outputs.ver }}.zip` 解压运行
+            - **已有用户**: 程序启动时自动检测更新，无需手动操作
+
+            ### 更新方式
+            已安装用户启动程序后会自动提示更新。
+          files: |
+            backend/dist/ETFRadar-Windows-v${{ steps.version.outputs.ver }}.zip
+            backend/dist/etf-radar-update.zip
 
   build-mac:
     runs-on: macos-latest
@@ -79,6 +100,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: 获取版本号
+        id: version
+        run: echo "ver=$(grep 'VERSION' backend/app/core/config.py | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')" >> $GITHUB_OUTPUT
 
       - name: 构建前端
         run: |
@@ -101,12 +126,19 @@ jobs:
       - name: 复制使用说明
         run: cp 使用说明.txt backend/dist/ETFRadar/
 
-      - name: 获取版本号
-        id: version
-        run: echo "ver=$(grep 'VERSION' backend/app/core/config.py | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')" >> $GITHUB_OUTPUT
+      - name: 打包zip
+        run: |
+          cd backend/dist
+          zip -r ETFRadar-Mac-v${{ steps.version.outputs.ver }}.zip ETFRadar/
 
-      - name: 上传完整包
+      - name: 上传完整包(Artifact)
         uses: actions/upload-artifact@v4
         with:
           name: ETFRadar-Mac-v${{ steps.version.outputs.ver }}
           path: backend/dist/ETFRadar/
+
+      - name: 发布 Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: backend/dist/ETFRadar-Mac-v${{ steps.version.outputs.ver }}.zip
