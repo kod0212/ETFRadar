@@ -9,19 +9,19 @@
     <a-row :gutter="16" style="margin-bottom: 24px">
       <a-col :span="8">
         <a-statistic :title="filterLabel ? `筛选ETF数` : '追踪ETF数'"
-                     :value="filteredData.length" :suffix="filterLabel ? `/ ${latestData.length}` : ''" />
+                     :value="filteredData.length" :suffix="filterLabel ? `/ ${latestData.length}` : ''" :loading="loading" />
       </a-col>
       <a-col :span="8">
-        <a-statistic title="数据最新日期" :value="lastCollectTime" />
+        <a-statistic title="数据最新日期" :value="lastCollectTime" :loading="loading" />
       </a-col>
       <a-col :span="8">
         <a-statistic :title="filterLabel ? '筛选合计市值(亿元)' : '全部合计市值(亿元)'"
-                     :value="summaryMcap" :precision="2" />
+                     :value="summaryMcap" :precision="2" :loading="loading" />
       </a-col>
     </a-row>
 
     <!-- 趋势图 -->
-    <a-card :title="chartTitle" style="margin-bottom: 24px" size="small">
+    <a-card :title="chartTitle" style="margin-bottom: 24px; position: relative" size="small">
       <template #extra>
         <a-space>
           <a-radio-group v-model:value="metric" size="small" @change="loadTrend">
@@ -44,12 +44,16 @@
         </a-space>
       </template>
       <div ref="chartRef" style="width: 100%; height: 360px"></div>
+      <a-empty v-if="!loading && trendData.length === 0" description="暂无趋势数据" style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%)" />
     </a-card>
 
     <!-- 最新数据表格 -->
     <a-card :title="`最新份额数据${filterLabel ? ' — ' + filterLabel : ''}`" size="small">
       <a-table :dataSource="filteredData" :columns="columns" rowKey="fund_code"
-               size="small" :pagination="false">
+               size="small" :loading="loading" :pagination="{ pageSize: 50, showSizeChanger: true, pageSizeOptions: ['20','50','100'], showTotal: (t: number) => `共 ${t} 只` }">
+        <template #emptyText>
+          <a-empty :description="loading ? '加载中...' : '暂无追踪ETF，请先到ETF管理添加'" />
+        </template>
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'fund_code'">
             <a @click="$router.push(`/detail/${record.fund_code}`)">{{ record.fund_code }}</a>
@@ -81,8 +85,9 @@ const trendData = ref<any[]>([])
 const metric = ref('market_cap')
 const lastCollectTime = ref('-')
 const updateStatus = ref({ running: false, step: '', progress: '' })
-const filterKey = ref('__all__')  // __all__ | g:沪深300 | t:核心持仓
+const filterKey = ref('__all__')
 const chartRef = ref<HTMLElement>()
+const loading = ref(true)
 let chart: echarts.ECharts | null = null
 let pollTimer: any = null
 
@@ -141,12 +146,17 @@ const chartTitle = computed(() => {
 const columns = [
   { title: '代码', dataIndex: 'fund_code', key: 'fund_code', width: 100 },
   { title: '名称', dataIndex: 'name', key: 'name' },
-  { title: '最新价', dataIndex: 'price', key: 'price', width: 100 },
+  { title: '最新价', dataIndex: 'price', key: 'price', width: 100,
+    sorter: (a: any, b: any) => (a.price || 0) - (b.price || 0) },
   { title: '总市值(亿)', dataIndex: 'total_market_cap', key: 'total_market_cap', width: 120,
-    customRender: ({ text }: any) => text?.toFixed(2) },
+    customRender: ({ text }: any) => text?.toFixed(2),
+    sorter: (a: any, b: any) => (a.total_market_cap || 0) - (b.total_market_cap || 0),
+    defaultSortOrder: 'descend' as const },
   { title: '份额(亿份)', dataIndex: 'shares', key: 'shares', width: 120,
-    customRender: ({ text }: any) => text?.toFixed(2) },
-  { title: '份额变化', dataIndex: 'change_shares', key: 'change_shares', width: 100 },
+    customRender: ({ text }: any) => text?.toFixed(2),
+    sorter: (a: any, b: any) => (a.shares || 0) - (b.shares || 0) },
+  { title: '份额变化', dataIndex: 'change_shares', key: 'change_shares', width: 100,
+    sorter: (a: any, b: any) => (a.change_shares || 0) - (b.change_shares || 0) },
   { title: '标签', key: 'all_tags', width: 200 },
 ]
 
@@ -220,6 +230,7 @@ onMounted(async () => {
     }
   } catch { /* empty */ }
   await loadTrend()
+  loading.value = false
 })
 
 onUnmounted(() => {
