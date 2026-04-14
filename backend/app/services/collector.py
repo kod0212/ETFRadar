@@ -5,6 +5,7 @@ import requests
 import json
 import re
 import time
+import functools
 from datetime import date, datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -12,10 +13,44 @@ from app.core.database import SessionLocal
 from app.models.models import ETFFund, ETFShare, CollectLog
 
 
+def retry(max_retries=3, delays=(1, 3, 5), default=None):
+    """网络请求重试装饰器，超时/连接错误/5xx自动重试"""
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            for i in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except (requests.exceptions.Timeout,
+                        requests.exceptions.ConnectionError,
+                        requests.exceptions.ChunkedEncodingError,
+                        ConnectionError, TimeoutError) as e:
+                    if i < max_retries:
+                        delay = delays[min(i, len(delays) - 1)]
+                        logger.warning(f"[retry] {func.__name__} 第{i+1}次失败({type(e).__name__}), {delay}s后重试")
+                        time.sleep(delay)
+                    else:
+                        logger.error(f"[retry] {func.__name__} {max_retries}次重试均失败: {e}")
+                        return default() if callable(default) else default
+                except requests.exceptions.HTTPError as e:
+                    if e.response is not None and e.response.status_code >= 500 and i < max_retries:
+                        delay = delays[min(i, len(delays) - 1)]
+                        logger.warning(f"[retry] {func.__name__} 服务端{e.response.status_code}, {delay}s后重试")
+                        time.sleep(delay)
+                    else:
+                        logger.error(f"[retry] {func.__name__} HTTP错误: {e}")
+                        return default() if callable(default) else default
+            return default() if callable(default) else default
+        return wrapper
+    return decorator
+
+
+@retry(default=list)
 def fetch_etf_realtime(codes: list[dict]) -> list[dict]:
     """腾讯财经接口批量获取ETF实时数据(含总市值→份额)"""
     query = ",".join(f"{c['market']}{c['code']}" for c in codes)
     resp = requests.get(f"https://qt.gtimg.cn/q={query}", timeout=15)
+    resp.raise_for_status()
     resp.encoding = "gbk"
     results = []
     for line in resp.text.strip().split(";"):
@@ -35,6 +70,7 @@ def fetch_etf_realtime(codes: list[dict]) -> list[dict]:
     return results
 
 
+@retry(default=dict)
 def fetch_sse_shares_by_date(dt: str) -> dict:
     """
     上交所ETF份额(按日期), dt格式: 20260403
@@ -52,6 +88,7 @@ def fetch_sse_shares_by_date(dt: str) -> dict:
         return {}
 
 
+@retry(default=dict)
 def fetch_szse_shares() -> dict:
     """深交所ETF当日份额"""
     import akshare as ak
@@ -331,6 +368,7 @@ def _fetch_szse_range(start: str, end: str) -> list:
             resp = requests.get("https://www.szse.cn/api/report/ShowReport/data",
                                 params=params, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.szse.cn/"},
                                 timeout=15)
+            resp.raise_for_status()
             tab = resp.json()[0]
             records = tab.get("data", [])
             if not records:
@@ -347,6 +385,11 @@ def _fetch_szse_range(start: str, end: str) -> list:
             if len(result) >= total:
                 break
             page += 1
+            time.sleep(0.5)  # 深交所限速
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            logger.warning(f"[szse] 第{page}页请求失败({type(e).__name__}), 已获取{len(result)}条, 继续")
+            time.sleep(2)
+            page += 1  # 跳过当前页继续
         except Exception:
             break
     return result
@@ -490,6 +533,7 @@ def _fetch_szse_history(fund_code: str) -> list[dict]:
             }
             resp = requests.get("https://www.szse.cn/api/report/ShowReport/data",
                                 params=params, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://www.szse.cn/"}, timeout=15)
+            resp.raise_for_status()
             tab = resp.json()[0]
             records = tab.get("data", [])
             if not records:
@@ -498,6 +542,7 @@ def _fetch_szse_history(fund_code: str) -> list[dict]:
             if len(all_records) >= tab.get("metadata", {}).get("recordcount", 0):
                 break
             page += 1
+            time.sleep(0.5)
     result = []
     for r in all_records:
         try:
@@ -531,12 +576,14 @@ def _fetch_quarterly_shares(fund_code: str) -> list[dict]:
     return result
 
 
+@retry(default=list)
 def _fetch_sina_kline(code: str, market: str, datalen: int = 365) -> list[dict]:
     """新浪财经历史日K线"""
     symbol = f"{market}{code}"
     url = (f"https://quotes.sina.cn/cn/api/jsonp_v2.php/=/"
            f"CN_MarketDataService.getKLineData?symbol={symbol}&scale=240&ma=no&datalen={datalen}")
     resp = requests.get(url, timeout=15)
+    resp.raise_for_status()
     match = re.search(r'=\((.*)\)', resp.text, re.DOTALL)
     if not match:
         return []
@@ -585,6 +632,7 @@ def _upsert_share(db: Session, code: str, trade_date, price, mcap, shares, sourc
         db.rollback()
 
 
+@retry(default=lambda: None)
 def _lookup_from_tencent_simple(code: str) -> dict:
     """腾讯接口查ETF名称和市场"""
     for market in ["sh", "sz"]:
