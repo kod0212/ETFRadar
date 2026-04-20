@@ -387,9 +387,8 @@ def _fetch_szse_range(start: str, end: str) -> list:
             page += 1
             time.sleep(0.5)  # 深交所限速
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-            logger.warning(f"[szse] 第{page}页请求失败({type(e).__name__}), 已获取{len(result)}条, 继续")
-            time.sleep(2)
-            page += 1  # 跳过当前页继续
+            logger.warning(f"[szse] 第{page}页请求失败({type(e).__name__}), 已获取{len(result)}条")
+            break  # 连接失败直接停止，不再继续翻页
         except Exception:
             break
     return result

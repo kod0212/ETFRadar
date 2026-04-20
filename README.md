@@ -1,14 +1,16 @@
 # 📡 ETF雷达
 
-自动追踪A股ETF基金份额变化的Web应用，帮助投资者直观感知大资金（如国家队）的动态。
+自动追踪A股ETF基金份额/规模变化的桌面应用，帮助投资者直观感知大资金（如国家队）的动态。
 
 ## 功能
 
-- 📊 **份额趋势图** — 按分组查看ETF份额/市值变化趋势
-- 📋 **最新数据表格** — 所有追踪ETF的最新份额、市值、变化量
+- 📊 **份额趋势图** — 按标签筛选，支持1月/3月/6月/1年/全部时间范围
+- 📋 **最新数据表格** — 支持排序、搜索、分页
+- 🏷️ **标签体系** — 系统标签（自动识别80+种分类）+ 自定义标签
 - 🔍 **ETF详情** — 单只ETF历史趋势 + 数据表格
-- ⚙️ **ETF管理** — 添加/删除/分组，新增ETF自动有历史数据
-- 🔄 **自动更新** — 打开页面自动补上缺失天数，无需手动操作
+- ⚙️ **ETF管理** — 添加/删除/标签编辑，预置1400+只ETF历史数据
+- 🔄 **自动数据更新** — 打开页面自动补上缺失天数
+- 🆙 **自动版本更新** — 网页端一键更新，无需手动替换文件
 
 ## 数据来源
 
@@ -17,93 +19,67 @@
 | 上交所ETF每日份额 | 上交所官网 (sse.com.cn) | 每日精确 |
 | 深交所ETF每日份额 | 深交所官网 (szse.cn) | 每日精确 |
 | ETF实时价格/市值 | 腾讯财经 | 实时 |
-| 预置历史数据 | 上交所+深交所 | 1461只ETF, 约1年 |
+| 历史K线 | 新浪财经 | 每日 |
 
-## 快速开始
+## 使用方式
 
-### 方式一：Docker（推荐）
+### 下载安装
+
+从 [Releases](https://github.com/kod0212/ETFRadar/releases) 下载对应平台的完整包，解压后运行。
+
+- **Windows**: 双击 `ETFRadar.exe`
+- **Mac**: 终端执行 `./ETFRadar`（首次需 `xattr -cr ETFRadar/`）
+
+启动后浏览器自动打开 http://localhost:9528
+
+### 版本更新
+
+程序会自动检查新版本，网页顶部提示更新，点击即可完成。
+
+### 本地开发
 
 ```bash
-git clone https://github.com/kod0212/ETFRadar.git
-cd ETFRadar
-docker-compose up
-```
-
-打开 http://localhost:5173
-
-### 方式二：本地开发
-
-**后端**（终端1）：
-```bash
+# 后端
 cd backend
 pip install -r requirements.txt
-python -m app.main
-```
+python run.py
 
-**前端**（终端2）：
-```bash
+# 前端
 cd frontend
 npm install
 npm run dev
 ```
 
-打开 http://localhost:5173
-
 ## 技术栈
 
 - **后端**: Python + FastAPI + SQLAlchemy + SQLite
 - **前端**: Vue 3 + TypeScript + Ant Design Vue + ECharts
-- **数据源**: 上交所/深交所官方接口 + 腾讯财经
+- **打包**: PyInstaller (exe启动器 + 外置代码)
+- **更新**: 阿里云 OSS 分发，网页端一键热更新
+- **CI/CD**: GitHub Actions 自动打包 + 发布
 
 ## 项目结构
 
 ```
-ETFRadar/
-├── backend/
-│   ├── app/
-│   │   ├── api/v1/        # RESTful API (funds/shares/collect)
-│   │   ├── core/          # 配置、数据库、初始化
-│   │   ├── models/        # SQLAlchemy ORM
-│   │   ├── schemas/       # Pydantic 模型
-│   │   └── services/      # 数据采集服务
-│   ├── data/
-│   │   └── seed.db.gz     # 预置数据 (1461只ETF, ~43万条)
-│   └── scripts/           # 数据回补脚本
-├── frontend/
-│   └── src/
-│       ├── views/         # 仪表盘/管理/详情页
-│       ├── api.ts         # API 封装
-│       └── router.ts      # 路由
-├── docker-compose.yml     # 一键部署
-└── docs/
-    └── architecture.md    # 架构设计文档
+ETFRadar/                    # 打包产物
+├── ETFRadar.exe             # 启动器（极少更新）
+├── app/                     # 后端代码（可热更新）
+├── static/                  # 前端页面（可热更新）
+├── data/
+│   ├── etf.db               # 用户数据库（自动生成，永不覆盖）
+│   └── seed.db.gz           # 预置数据（可热更新）
+└── log/                     # 日志
 ```
 
-## API 文档
+## 发版流程
 
-启动后端后访问 http://localhost:8000/api/docs 查看 Swagger UI。
-
-主要接口：
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | /api/v1/funds | ETF列表 |
-| POST | /api/v1/funds | 添加ETF |
-| GET | /api/v1/shares/latest | 最新份额 |
-| GET | /api/v1/shares/trend | 趋势数据 |
-| POST | /api/v1/collect/trigger | 触发增量更新 |
-
-## 数据更新机制
-
-- **预置数据**: 首次启动从 `seed.db.gz` 恢复，包含约1年历史
-- **增量更新**: 打开页面时自动检查，补上数据库最新日期到今天的缺失数据
-- **数据源**: 上交所/深交所官方接口，每日精确份额
-
-## 相关文档
-
-- [产品需求文档 (PRD)](docs/prd.md)
-- [架构设计](docs/architecture.md)
-- [Docker 部署指南](docs/docker-deploy.md)
+```bash
+# 改代码 → 更新 VERSION → 提交
+git add -A && git commit -m "release: vX.Y.Z"
+git tag vX.Y.Z && git push && git push --tags
+# Actions 自动: 打包 → 上传 OSS → 创建 Release
+# 用户下次打开自动检测到新版本
+```
 
 ## License
 
