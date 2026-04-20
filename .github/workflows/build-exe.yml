@@ -177,8 +177,8 @@ jobs:
           # 安装 ossutil
           curl -o ossutil.zip "https://gosspublic.alicdn.com/ossutil/1.7.19/ossutil-v1.7.19-mac-amd64.zip"
           unzip ossutil.zip -d ossutil
-          OSSUTIL=$(find ossutil -name "ossutil" -o -name "ossutil64" | head -1)
-          chmod +x $OSSUTIL
+          chmod +x ossutil/ossutil-v1.7.19-mac-amd64/ossutilmac64
+          OSSUTIL=ossutil/ossutil-v1.7.19-mac-amd64/ossutilmac64
 
           $OSSUTIL config -e ${{ env.OSS_REGION }}.aliyuncs.com \
             -i ${{ secrets.ALIYUN_ACCESS_KEY_ID }} \
