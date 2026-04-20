@@ -1,132 +1,115 @@
-"""自动更新模块
-从 GitHub Release 检查并下载更新包
-更新包只包含 app/ + static/ + data/seed.db.gz（不含 exe）
-"""
+"""自动更新模块 - 从阿里云 OSS 检查并下载更新"""
 import os
-import sys
-import json
 import shutil
 import logging
 import zipfile
 import tempfile
+import threading
 import requests
-from pathlib import Path
 from typing import Optional
 from app.core.config import VERSION
 
 logger = logging.getLogger(__name__)
 
-GITHUB_REPO = "kod0212/ETFRadar"
-GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-UPDATE_ASSET_NAME = "etf-radar-update.zip"
+OSS_BASE = "https://etf-radar-release1.oss-cn-hangzhou.aliyuncs.com"
+VERSION_URL = f"{OSS_BASE}/version.json"
+
+# 更新进度状态
+_progress = {"status": "idle", "percent": 0, "message": ""}
+_update_lock = threading.Lock()
 
 
 def check_update() -> Optional[dict]:
-    """检查 GitHub 是否有新版本，返回更新信息或 None"""
+    """检查 OSS 是否有新版本"""
     try:
-        resp = requests.get(GITHUB_API, timeout=10,
-                            headers={"Accept": "application/vnd.github.v3+json"})
+        resp = requests.get(VERSION_URL, timeout=10)
         if resp.status_code != 200:
             return None
-        release = resp.json()
-        remote_version = release.get("tag_name", "").lstrip("v")
-        if not remote_version:
+        info = resp.json()
+        remote = info.get("version", "")
+        if not remote or _compare_version(remote, VERSION) <= 0:
             return None
-
-        if _compare_version(remote_version, VERSION) <= 0:
-            logger.info(f"当前版本 v{VERSION} 已是最新")
-            return None
-
-        # 找更新包资源
-        download_url = None
-        for asset in release.get("assets", []):
-            if asset["name"] == UPDATE_ASSET_NAME:
-                download_url = asset["browser_download_url"]
-                break
-
-        if not download_url:
-            logger.info(f"新版本 v{remote_version} 无更新包，需手动更新")
-            return None
-
-        return {
-            "version": remote_version,
-            "download_url": download_url,
-            "description": release.get("body", "")[:200],
-        }
+        return info
     except Exception as e:
         logger.debug(f"检查更新失败: {e}")
         return None
 
 
+def get_progress() -> dict:
+    return dict(_progress)
+
+
 def do_update(update_info: dict):
-    """下载并应用更新"""
+    """在后台线程执行更新"""
+    if not _update_lock.acquire(blocking=False):
+        return
+    threading.Thread(target=_run_update, args=(update_info,), daemon=True).start()
+
+
+def _run_update(update_info: dict):
+    """下载并应用热更新"""
     base_dir = os.environ.get("ETF_BASE_DIR", os.getcwd())
-    download_url = update_info["download_url"]
-
-    logger.info(f"下载更新包: {download_url}")
-    print("  下载更新包...")
-
-    # 下载到临时文件
-    tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+    url = update_info.get("update_url", "")
     try:
-        resp = requests.get(download_url, timeout=120, stream=True)
+        _progress.update(status="downloading", percent=0, message="下载更新包...")
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+        resp = requests.get(url, timeout=120, stream=True)
+        resp.raise_for_status()
         total = int(resp.headers.get("content-length", 0))
         downloaded = 0
         for chunk in resp.iter_content(chunk_size=8192):
             tmp.write(chunk)
             downloaded += len(chunk)
             if total:
-                pct = downloaded * 100 // total
-                print(f"\r  下载进度: {pct}%", end="", flush=True)
-        print()
+                _progress["percent"] = int(downloaded * 80 / total)  # 下载占0-80%
         tmp.close()
 
-        # 解压
-        print("  应用更新...")
+        _progress.update(status="extracting", percent=82, message="解压替换文件...")
         with zipfile.ZipFile(tmp.name, "r") as zf:
-            # 解压到临时目录
             tmp_dir = tempfile.mkdtemp()
             zf.extractall(tmp_dir)
 
-            # 替换 app/
-            app_src = os.path.join(tmp_dir, "app")
-            app_dst = os.path.join(base_dir, "app")
-            if os.path.exists(app_src):
-                if os.path.exists(app_dst):
-                    shutil.rmtree(app_dst)
-                shutil.copytree(app_src, app_dst)
-                logger.info("更新 app/ 完成")
+            for folder in ("app", "static"):
+                src = os.path.join(tmp_dir, folder)
+                dst = os.path.join(base_dir, folder)
+                if os.path.exists(src):
+                    if os.path.exists(dst):
+                        shutil.rmtree(dst)
+                    shutil.copytree(src, dst)
 
-            # 替换 static/
-            static_src = os.path.join(tmp_dir, "static")
-            static_dst = os.path.join(base_dir, "static")
-            if os.path.exists(static_src):
-                if os.path.exists(static_dst):
-                    shutil.rmtree(static_dst)
-                shutil.copytree(static_src, static_dst)
-                logger.info("更新 static/ 完成")
-
-            # 替换 seed.db.gz
             seed_src = os.path.join(tmp_dir, "data", "seed.db.gz")
             seed_dst = os.path.join(base_dir, "data", "seed.db.gz")
             if os.path.exists(seed_src):
                 shutil.copy2(seed_src, seed_dst)
-                logger.info("更新 seed.db.gz 完成")
 
             shutil.rmtree(tmp_dir)
-
-        logger.info(f"更新到 v{update_info['version']} 完成")
-    finally:
         os.unlink(tmp.name)
+
+        _progress.update(status="merging", percent=90, message="更新数据库...")
+        try:
+            from app.core.init_data import _merge_upgrade, _find_seed_gz
+            seed = _find_seed_gz()
+            if seed:
+                _merge_upgrade(seed)
+        except Exception as e:
+            logger.warning(f"数据库合并跳过: {e}")
+
+        _progress.update(status="done", percent=100,
+                         message=f"更新到 v{update_info['version']} 完成")
+        logger.info(f"更新到 v{update_info['version']} 完成")
+
+    except Exception as e:
+        _progress.update(status="failed", percent=0, message=f"更新失败: {e}")
+        logger.error(f"更新失败: {e}")
+    finally:
+        _update_lock.release()
 
 
 def _compare_version(v1: str, v2: str) -> int:
-    """比较版本号，v1>v2返回1，v1==v2返回0，v1<v2返回-1"""
     parts1 = [int(x) for x in v1.split(".")]
     parts2 = [int(x) for x in v2.split(".")]
     for a, b in zip(parts1, parts2):
-        if a > b:
-            return 1
-        if a < b:
-            return -1
+        if a > b: return 1
+        if a < b: return -1
     return len(parts1) - len(parts2)

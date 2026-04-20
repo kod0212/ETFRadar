@@ -19,3 +19,8 @@ export const getSharesTrend = (params: any) => api.get('/shares/trend', { params
 // 采集
 export const triggerCollect = (force = false) => api.post(`/collect/trigger?force=${force}`)
 export const getCollectStatus = () => api.get('/collect/status')
+
+// 版本更新
+export const checkUpdate = () => api.get('/collect/check_update')
+export const doUpdate = () => api.post('/collect/do_update')
+export const getUpdateProgress = () => api.get('/collect/update_progress')

@@ -9,6 +9,7 @@ from app.api.deps import get_db
 from app.models.models import CollectLog, ETFShare
 from app.services.collector import incremental_update, get_update_status
 from app.core.config import VERSION
+from app.core.updater import check_update, do_update, get_progress
 from app.schemas.common import ApiResponse
 
 router = APIRouter(prefix="/collect", tags=["采集控制"])
@@ -40,3 +41,30 @@ def collect_status(db: Session = Depends(get_db)):
         ],
     }
     return ApiResponse(data=data)
+
+
+@router.get("/check_update", response_model=ApiResponse)
+def api_check_update():
+    """检查是否有新版本"""
+    info = check_update()
+    if info:
+        return ApiResponse(data={"has_update": True, **info})
+    return ApiResponse(data={"has_update": False, "version": VERSION})
+
+
+@router.post("/do_update", response_model=ApiResponse)
+def api_do_update():
+    """触发热更新"""
+    info = check_update()
+    if not info:
+        return ApiResponse(data={"status": "up_to_date"})
+    if info.get("update_type") == "cold":
+        return ApiResponse(data={"status": "cold", "message": "此版本需要下载完整包", **info})
+    do_update(info)
+    return ApiResponse(data={"status": "started"})
+
+
+@router.get("/update_progress", response_model=ApiResponse)
+def api_update_progress():
+    """获取更新进度"""
+    return ApiResponse(data=get_progress())

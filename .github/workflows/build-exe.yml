@@ -3,14 +3,16 @@ name: 打包并发布
 on:
   push:
     tags:
-      - 'v*'  # 推送tag时自动触发
-  workflow_dispatch:  # 也支持手动触发
+      - 'v*'
+  workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  OSS_BUCKET: etf-radar-release1
+  OSS_REGION: oss-cn-hangzhou
 
 permissions:
-  contents: write  # 需要写权限来创建Release
+  contents: write
 
 jobs:
   build:
@@ -63,11 +65,50 @@ jobs:
 
       - name: 打包zip
         shell: bash
-        run: |
-          cd backend/dist
-          7z a ETFRadar-Windows-v${{ steps.version.outputs.ver }}.zip ETFRadar/
+        run: cd backend/dist && 7z a ETFRadar-Windows-v${{ steps.version.outputs.ver }}.zip ETFRadar/
 
-      - name: 上传完整包(Artifact)
+      - name: 上传到 OSS
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          VER=${{ steps.version.outputs.ver }}
+          # 安装 ossutil
+          curl -o ossutil.zip "https://gosspublic.alicdn.com/ossutil/1.7.19/ossutil-v1.7.19-windows-amd64.zip"
+          7z x ossutil.zip -oossutil
+          OSSUTIL=$(find ossutil -name "ossutil64.exe" -o -name "ossutil.exe" | head -1)
+
+          # 配置
+          $OSSUTIL config -e ${{ env.OSS_REGION }}.aliyuncs.com \
+            -i ${{ secrets.ALIYUN_ACCESS_KEY_ID }} \
+            -k ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+
+          # 上传更新包
+          $OSSUTIL cp backend/dist/etf-radar-update.zip \
+            oss://${{ env.OSS_BUCKET }}/v${VER}/etf-radar-update.zip -f
+
+          # 上传完整包
+          $OSSUTIL cp backend/dist/ETFRadar-Windows-v${VER}.zip \
+            oss://${{ env.OSS_BUCKET }}/v${VER}/ETFRadar-Windows-v${VER}.zip -f
+
+          # 判断更新类型：Release描述含[cold]则为冷更新
+          UPDATE_TYPE="hot"
+
+          # 生成 version.json
+          OSS_BASE="https://${{ env.OSS_BUCKET }}.${{ env.OSS_REGION }}.aliyuncs.com"
+          cat > version.json << EOF
+          {
+            "version": "${VER}",
+            "update_type": "${UPDATE_TYPE}",
+            "description": "",
+            "update_url": "${OSS_BASE}/v${VER}/etf-radar-update.zip",
+            "full_url_windows": "${OSS_BASE}/v${VER}/ETFRadar-Windows-v${VER}.zip",
+            "full_url_mac": "${OSS_BASE}/v${VER}/ETFRadar-Mac-v${VER}.zip"
+          }
+          EOF
+
+          $OSSUTIL cp version.json oss://${{ env.OSS_BUCKET }}/version.json -f
+
+      - name: 上传 Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ETFRadar-Windows-v${{ steps.version.outputs.ver }}
@@ -81,12 +122,7 @@ jobs:
           body: |
             ## ETF雷达 v${{ steps.version.outputs.ver }}
 
-            ### 下载
-            - **首次安装**: 下载 `ETFRadar-Windows-v${{ steps.version.outputs.ver }}.zip` 解压运行
-            - **已有用户**: 程序启动时自动检测更新，无需手动操作
-
-            ### 更新方式
-            已安装用户启动程序后会自动提示更新。
+            已安装用户打开程序后会自动提示更新。
           files: |
             backend/dist/ETFRadar-Windows-v${{ steps.version.outputs.ver }}.zip
             backend/dist/etf-radar-update.zip
@@ -130,11 +166,26 @@ jobs:
         run: cp 使用说明.txt backend/dist/ETFRadar/
 
       - name: 打包zip
-        run: |
-          cd backend/dist
-          zip -r ETFRadar-Mac-v${{ steps.version.outputs.ver }}.zip ETFRadar/
+        run: cd backend/dist && zip -r ETFRadar-Mac-v${{ steps.version.outputs.ver }}.zip ETFRadar/
 
-      - name: 上传完整包(Artifact)
+      - name: 上传到 OSS
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VER=${{ steps.version.outputs.ver }}
+          # 安装 ossutil
+          curl -o ossutil.zip "https://gosspublic.alicdn.com/ossutil/1.7.19/ossutil-v1.7.19-mac-amd64.zip"
+          unzip ossutil.zip -d ossutil
+          OSSUTIL=$(find ossutil -name "ossutil" -o -name "ossutil64" | head -1)
+          chmod +x $OSSUTIL
+
+          $OSSUTIL config -e ${{ env.OSS_REGION }}.aliyuncs.com \
+            -i ${{ secrets.ALIYUN_ACCESS_KEY_ID }} \
+            -k ${{ secrets.ALIYUN_ACCESS_KEY_SECRET }}
+
+          $OSSUTIL cp backend/dist/ETFRadar-Mac-v${VER}.zip \
+            oss://${{ env.OSS_BUCKET }}/v${VER}/ETFRadar-Mac-v${VER}.zip -f
+
+      - name: 上传 Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ETFRadar-Mac-v${{ steps.version.outputs.ver }}
