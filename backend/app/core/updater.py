@@ -47,23 +47,50 @@ def do_update(update_info: dict):
 
 
 def _run_update(update_info: dict):
-    """下载并应用热更新"""
+    """下载并应用热更新，优先GitHub，超时fallback到OSS"""
     base_dir = os.environ.get("ETF_BASE_DIR", os.getcwd())
-    url = update_info.get("update_url", "")
+    urls = []
+    # 优先 GitHub
+    if update_info.get("github_url"):
+        urls.append(update_info["github_url"])
+    # OSS 兜底
+    if update_info.get("update_url"):
+        urls.append(update_info["update_url"])
+
     try:
         _progress.update(status="downloading", percent=0, message="下载更新包...")
 
         tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
-        resp = requests.get(url, timeout=120, stream=True)
-        resp.raise_for_status()
-        total = int(resp.headers.get("content-length", 0))
-        downloaded = 0
-        for chunk in resp.iter_content(chunk_size=8192):
-            tmp.write(chunk)
-            downloaded += len(chunk)
-            if total:
-                _progress["percent"] = int(downloaded * 80 / total)  # 下载占0-80%
+        downloaded = False
+        for i, url in enumerate(urls):
+            try:
+                source = "GitHub" if "github" in url else "OSS"
+                _progress["message"] = f"从{source}下载中..."
+                resp = requests.get(url, timeout=30, stream=True)
+                resp.raise_for_status()
+                total = int(resp.headers.get("content-length", 0))
+                dl = 0
+                for chunk in resp.iter_content(chunk_size=8192):
+                    tmp.write(chunk)
+                    dl += len(chunk)
+                    if total:
+                        _progress["percent"] = int(dl * 80 / total)
+                downloaded = True
+                logger.info(f"从{source}下载成功")
+                break
+            except Exception as e:
+                logger.warning(f"从{source}下载失败: {e}")
+                tmp.seek(0)
+                tmp.truncate()
+                if i < len(urls) - 1:
+                    _progress["message"] = "切换备用下载源..."
+                    continue
+                else:
+                    raise Exception("所有下载源均失败")
         tmp.close()
+
+        if not downloaded:
+            raise Exception("下载失败")
 
         _progress.update(status="extracting", percent=82, message="解压替换文件...")
         with zipfile.ZipFile(tmp.name, "r") as zf:

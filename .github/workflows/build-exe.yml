@@ -95,11 +95,13 @@ jobs:
 
           # 生成 version.json
           OSS_BASE="https://${{ env.OSS_BUCKET }}.${{ env.OSS_REGION }}.aliyuncs.com"
+          GITHUB_BASE="https://github.com/${{ github.repository }}/releases/download/v${VER}"
           cat > version.json << EOF
           {
             "version": "${VER}",
             "update_type": "${UPDATE_TYPE}",
             "description": "",
+            "github_url": "${GITHUB_BASE}/etf-radar-update.zip",
             "update_url": "${OSS_BASE}/v${VER}/etf-radar-update.zip",
             "full_url_windows": "${OSS_BASE}/v${VER}/ETFRadar-Windows-v${VER}.zip",
             "full_url_mac": "${OSS_BASE}/v${VER}/ETFRadar-Mac-v${VER}.zip"
