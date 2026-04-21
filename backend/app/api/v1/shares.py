@@ -15,7 +15,6 @@ router = APIRouter(prefix="/shares", tags=["份额数据"])
 @router.get("", response_model=ApiResponse)
 def query_shares(
     code: Optional[str] = None,
-    group: Optional[str] = None,
     start: Optional[date] = None,
     end: Optional[date] = None,
     limit: int = Query(default=500, le=2000),
@@ -24,9 +23,6 @@ def query_shares(
     q = db.query(ETFShare)
     if code:
         q = q.filter(ETFShare.fund_code == code)
-    if group:
-        fund_codes = [f.code for f in db.query(ETFFund).filter(ETFFund.group_tag == group).all()]
-        q = q.filter(ETFShare.fund_code.in_(fund_codes))
     if start:
         q = q.filter(ETFShare.trade_date >= start)
     if end:
@@ -39,19 +35,33 @@ def query_shares(
 def latest_shares(db: Session = Depends(get_db)):
     """每只追踪ETF各自的最新一条记录"""
     from sqlalchemy import and_
-    funds = db.query(ETFFund).all()
+
+    # 子查询：每只ETF的最新日期
+    sub = db.query(
+        ETFShare.fund_code,
+        func.max(ETFShare.trade_date).label("max_date"),
+    ).group_by(ETFShare.fund_code).subquery()
+
+    # 一次查出所有最新记录
+    funds = {f.code: f for f in db.query(ETFFund).all()}
+    if not funds:
+        return ApiResponse(data=[])
+
+    rows = db.query(ETFShare).join(
+        sub, and_(ETFShare.fund_code == sub.c.fund_code, ETFShare.trade_date == sub.c.max_date)
+    ).filter(ETFShare.fund_code.in_(funds.keys())).all()
+
     data = []
-    for fund in funds:
-        row = db.query(ETFShare).filter(
-            ETFShare.fund_code == fund.code
-        ).order_by(ETFShare.trade_date.desc()).first()
-        if row:
-            d = ShareOut.model_validate(row).model_dump()
-            d["name"] = fund.name
-            d["group_tag"] = fund.group_tag
-            d["sys_tags"] = fund.sys_tags
-            d["tags"] = fund.tags
-            data.append(d)
+    for row in rows:
+        fund = funds.get(row.fund_code)
+        if not fund:
+            continue
+        d = ShareOut.model_validate(row).model_dump()
+        d["name"] = fund.name
+        d["group_tag"] = fund.group_tag
+        d["sys_tags"] = fund.sys_tags
+        d["tags"] = fund.tags
+        data.append(d)
     return ApiResponse(data=data)
 
 
@@ -89,7 +99,6 @@ def shares_summary(
 def shares_trend(
     code: Optional[str] = None,
     codes: Optional[str] = Query(default=None, description="多个代码逗号分隔"),
-    group: Optional[str] = None,
     metric: str = Query(default="market_cap", description="market_cap 或 shares"),
     start: Optional[date] = None,
     end: Optional[date] = None,
@@ -125,26 +134,7 @@ def shares_trend(
         # 只保留所有ETF都有数据的日期
         data = [TrendPoint(trade_date=r[0], value=round(r[1], 2))
                 for r in rows if r[2] == len(code_list)]
-    elif group:
-        # 组内ETF数量
-        group_funds = db.query(ETFFund).filter(ETFFund.group_tag == group).all()
-        group_count = len(group_funds)
-        group_codes = [f.code for f in group_funds]
-
-        # 查每个日期的汇总，只保留组内所有ETF都有数据的日期
-        rows = db.query(
-            ETFShare.trade_date,
-            func.sum(col).label("total"),
-            func.count(ETFShare.fund_code).label("cnt"),
-        ).filter(
-            ETFShare.fund_code.in_(group_codes),
-            ETFShare.trade_date >= start,
-            ETFShare.trade_date <= end,
-            col.isnot(None),
-        ).group_by(ETFShare.trade_date).order_by(ETFShare.trade_date).all()
-        data = [TrendPoint(trade_date=r[0], value=round(r[1], 2))
-                for r in rows if r[2] == group_count]
     else:
-        return ApiResponse(code=400, message="需要指定 code 或 group 参数")
+        return ApiResponse(code=400, message="需要指定 code 或 codes 参数")
 
     return ApiResponse(data=data)

@@ -61,12 +61,14 @@ def init_seed_data():
 def _merge_upgrade(seed_gz: Path):
     """
     合并升级：用seed中的新数据更新现有数据库，保留用户数据
-    - 更新 etf_dict（新ETF、新名称、新标签规则）
-    - 更新 etf_fund.sys_tags（系统标签刷新）
-    - 补入新的 etf_share 数据（seed中有但本地没有的）
-    - 保留用户的 etf_fund（追踪列表）和 tags（自定义标签）
     """
     import tempfile, os
+
+    # 版本检查：如果已合并过当前版本则跳过
+    version_file = DATA_DIR / ".last_merge_version"
+    if version_file.exists() and version_file.read_text().strip() == VERSION:
+        logger.info(f"升级: 已是 v{VERSION}，跳过合并")
+        return
 
     # 解压seed到临时文件
     tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
@@ -138,5 +140,9 @@ def _merge_upgrade(seed_gz: Path):
         main_conn.commit()
         main_conn.close()
         seed_conn.close()
+
+        # 记录已合并版本
+        version_file = DATA_DIR / ".last_merge_version"
+        version_file.write_text(VERSION)
     finally:
         os.unlink(tmp.name)

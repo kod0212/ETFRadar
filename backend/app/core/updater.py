@@ -21,6 +21,9 @@ _update_lock = threading.Lock()
 
 def check_update() -> Optional[dict]:
     """检查 OSS 是否有新版本"""
+    # 重置上次的完成/失败状态
+    if _progress["status"] in ("done", "failed"):
+        _progress.update(status="idle", percent=0, message="")
     try:
         resp = requests.get(VERSION_URL, timeout=10)
         if resp.status_code != 200:

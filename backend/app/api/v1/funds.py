@@ -3,7 +3,6 @@ logger = logging.getLogger(__name__)
 """API 路由 - ETF管理"""
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import Optional
 import requests
 from app.api.deps import get_db
 from app.models.models import ETFFund, ETFShare, ETFDict
@@ -58,11 +57,8 @@ def _lookup_from_tencent(code: str) -> dict:
 
 
 @router.get("", response_model=ApiResponse)
-def list_funds(group_tag: Optional[str] = None, db: Session = Depends(get_db)):
-    q = db.query(ETFFund)
-    if group_tag:
-        q = q.filter(ETFFund.group_tag == group_tag)
-    funds = q.order_by(ETFFund.code).all()
+def list_funds(db: Session = Depends(get_db)):
+    funds = db.query(ETFFund).order_by(ETFFund.code).all()
     return ApiResponse(data=[FundOut.model_validate(f) for f in funds])
 
 
@@ -73,16 +69,13 @@ def create_fund(body: FundCreate, db: Session = Depends(get_db)):
     # 自动从字典表获取分组
     dict_entry = db.query(ETFDict).filter(ETFDict.code == body.code).first()
     data = body.model_dump()
-    if dict_entry:
-        if dict_entry.index_name:
-            data["group_tag"] = dict_entry.index_name
-        if dict_entry.auto_tags:
-            data["sys_tags"] = dict_entry.auto_tags
+    if dict_entry and dict_entry.auto_tags:
+        data["sys_tags"] = dict_entry.auto_tags
     fund = ETFFund(**data)
     db.add(fund)
     db.commit()
     db.refresh(fund)
-    logger.info(f"添加ETF: {fund.code} {fund.name} 分组:{fund.group_tag}")
+    logger.info(f"添加ETF: {fund.code} {fund.name} 标签:{fund.sys_tags}")
     return ApiResponse(data=FundOut.model_validate(fund))
 
 
