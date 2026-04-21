@@ -28,19 +28,37 @@ def _find_seed_gz() -> Path:
     return None
 
 
+def _ensure_indexes():
+    """确保关键查询有索引"""
+    conn = sqlite3.connect(str(MAIN_DB))
+    for sql in [
+        "CREATE INDEX IF NOT EXISTS idx_share_code ON etf_share(fund_code)",
+        "CREATE INDEX IF NOT EXISTS idx_share_date ON etf_share(trade_date)",
+        "CREATE INDEX IF NOT EXISTS idx_share_code_date ON etf_share(fund_code, trade_date)",
+    ]:
+        try:
+            conn.execute(sql)
+        except Exception:
+            pass
+    conn.commit()
+    conn.close()
+
+
 def init_seed_data():
     seed = _find_seed_gz()
 
     if not MAIN_DB.exists():
-        # 全新安装：直接从seed恢复
         if seed:
             with gzip.open(seed, "rb") as f_in, open(MAIN_DB, "wb") as f_out:
                 shutil.copyfileobj(f_in, f_out)
             logger.info("全新安装: 从 seed.db.gz 恢复预置数据")
-        return
+
+    # 确保索引存在
+    if MAIN_DB.exists():
+        _ensure_indexes()
 
     # 已有数据库：检查是否需要升级
-    if seed:
+    if MAIN_DB.exists() and seed:
         _merge_upgrade(seed)
 
     # 确保有默认ETF

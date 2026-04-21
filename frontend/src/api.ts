@@ -1,6 +1,23 @@
 import axios from 'axios'
+import { message } from 'ant-design-vue'
 
 const api = axios.create({ baseURL: '/api/v1' })
+
+// 统一错误处理
+api.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (err.response) {
+      const msg = err.response.data?.detail || err.response.data?.message || `请求失败 (${err.response.status})`
+      message.error(msg)
+    } else if (err.code === 'ECONNABORTED') {
+      message.error('请求超时，请检查网络')
+    } else {
+      message.error('网络连接失败，请检查后端是否运行')
+    }
+    return Promise.reject(err)
+  }
+)
 
 // ETF管理
 export const getFunds = () => api.get('/funds')

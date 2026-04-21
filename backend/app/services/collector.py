@@ -234,12 +234,15 @@ def _do_incremental_update(db: Session) -> dict:
     # 1b. 深交所
     _update_status.update(step="获取深交所份额", progress="请求中...")
     szse_records = _fetch_szse_range(start.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d"))
+    szse_ok = len(szse_records) > 0
     for code, dt_date, shares in szse_records:
         _upsert_share(db, code, dt_date, None, None, shares, "szse_api")
         all_codes.add(code)
         total_count += 1
     if szse_records:
         logger.info(f"  [update] 深交所: {len(szse_records)} 条")
+    else:
+        logger.warning("  [update] 深交所: 无数据(可能被限制访问)")
 
     db.commit()
 
@@ -295,7 +298,8 @@ def _do_incremental_update(db: Session) -> dict:
                      args=(str(start), tracked_codes, all_codes),
                      daemon=True).start()
 
-    return {"status": "success", "updated": total_count, "range": f"{start} → {today}"}
+    return {"status": "success", "updated": total_count, "range": f"{start} → {today}",
+            "sources": {"sse": True, "szse": szse_ok}}
 
 
 def _background_fill_prices(start_date: str, tracked_codes: set, all_codes: set):

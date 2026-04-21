@@ -172,7 +172,12 @@ const onCollect = async () => {
   try {
     const res = await triggerCollect(true)
     const d = res.data.data
-    message.success(`采集完成: ${d.updated || d.fund_count || 0} 条数据`)
+    const count = d.updated || d.fund_count || 0
+    if (d.sources && !d.sources.szse) {
+      message.warning(`采集完成: ${count} 条数据（深交所连接失败，仅更新上交所）`)
+    } else {
+      message.success(`采集完成: ${count} 条数据`)
+    }
   } catch {
     message.error('采集失败')
   } finally {
