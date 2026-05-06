@@ -17,10 +17,14 @@ VERSION_URL = f"{OSS_BASE}/version.json"
 # 更新进度状态
 _progress = {"status": "idle", "percent": 0, "message": ""}
 _update_lock = threading.Lock()
+_updated_this_session = False
 
 
 def check_update() -> Optional[dict]:
     """检查 OSS 是否有新版本"""
+    global _updated_this_session
+    if _updated_this_session:
+        return None
     # 重置上次的完成/失败状态
     if _progress["status"] in ("done", "failed"):
         _progress.update(status="idle", percent=0, message="")
@@ -43,10 +47,92 @@ def get_progress() -> dict:
 
 
 def do_update(update_info: dict):
-    """在后台线程执行更新"""
+    """在后台线程执行更新（前端手动触发）"""
     if not _update_lock.acquire(blocking=False):
         return
     threading.Thread(target=_run_update, args=(update_info,), daemon=True).start()
+
+
+def silent_update():
+    """启动时静默检查并更新，不影响前端状态"""
+    info = check_update()
+    if not info:
+        return
+    if info.get("update_type") == "cold":
+        logger.info(f"静默更新跳过: v{info['version']} 需要冷更新")
+        return
+    if not _update_lock.acquire(blocking=False):
+        return  # 手动更新正在进行
+    threading.Thread(target=_run_silent_update, args=(info,), daemon=True).start()
+
+
+def _run_silent_update(update_info: dict):
+    """静默更新：不更新_progress状态，避免干扰前端手动更新的进度显示"""
+    base_dir = os.environ.get("ETF_BASE_DIR", os.getcwd())
+    urls = []
+    if update_info.get("github_url"):
+        urls.append(update_info["github_url"])
+    if update_info.get("update_url"):
+        urls.append(update_info["update_url"])
+
+    try:
+        logger.info(f"静默更新: 开始下载 v{update_info['version']}")
+        tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+        downloaded = False
+        for i, url in enumerate(urls):
+            try:
+                source = "GitHub" if "github" in url else "OSS"
+                resp = requests.get(url, timeout=30, stream=True)
+                resp.raise_for_status()
+                for chunk in resp.iter_content(chunk_size=8192):
+                    tmp.write(chunk)
+                downloaded = True
+                logger.info(f"静默更新: 从{source}下载成功")
+                break
+            except Exception as e:
+                logger.warning(f"静默更新: 从{source}下载失败: {e}")
+                tmp.seek(0)
+                tmp.truncate()
+                if i >= len(urls) - 1:
+                    raise Exception("所有下载源均失败")
+        tmp.close()
+
+        if not downloaded:
+            raise Exception("下载失败")
+
+        with zipfile.ZipFile(tmp.name, "r") as zf:
+            tmp_dir = tempfile.mkdtemp()
+            zf.extractall(tmp_dir)
+            for folder in ("app", "static"):
+                src = os.path.join(tmp_dir, folder)
+                dst = os.path.join(base_dir, folder)
+                if os.path.exists(src):
+                    if os.path.exists(dst):
+                        shutil.rmtree(dst)
+                    shutil.copytree(src, dst)
+            seed_src = os.path.join(tmp_dir, "data", "seed.db.gz")
+            seed_dst = os.path.join(base_dir, "data", "seed.db.gz")
+            if os.path.exists(seed_src):
+                shutil.copy2(seed_src, seed_dst)
+            shutil.rmtree(tmp_dir)
+        os.unlink(tmp.name)
+
+        try:
+            from app.core.init_data import _merge_upgrade, _find_seed_gz
+            seed = _find_seed_gz()
+            if seed:
+                _merge_upgrade(seed)
+        except Exception as e:
+            logger.warning(f"静默更新: 数据库合并跳过: {e}")
+
+        logger.info(f"静默更新: v{update_info['version']} 完成，下次刷新页面生效")
+        global _updated_this_session
+        _updated_this_session = True
+
+    except Exception as e:
+        logger.error(f"静默更新失败: {e}")
+    finally:
+        _update_lock.release()
 
 
 def _run_update(update_info: dict):

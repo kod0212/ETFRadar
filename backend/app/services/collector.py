@@ -337,7 +337,7 @@ def _background_fill_prices(start_date: str, tracked_codes: set, all_codes: set)
             except Exception:
                 pass
             time.sleep(0.2)
-            if count % 500 == 0 and count > 0:
+            if count % 50 == 0 and count > 0:
                 db.commit()
 
         db.commit()
