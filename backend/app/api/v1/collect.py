@@ -48,8 +48,8 @@ def api_check_update():
     """检查是否有新版本"""
     info = check_update()
     if info:
-        return ApiResponse(data={"has_update": True, **info})
-    return ApiResponse(data={"has_update": False, "version": VERSION})
+        return ApiResponse(data={"has_update": True, "current": VERSION, **info})
+    return ApiResponse(data={"has_update": False, "current": VERSION})
 
 
 @router.post("/do_update", response_model=ApiResponse)
@@ -57,11 +57,11 @@ def api_do_update():
     """触发热更新"""
     info = check_update()
     if not info:
-        return ApiResponse(data={"status": "up_to_date"})
+        return ApiResponse(data={"status": "up_to_date", "message": "已是最新版本或检查更新失败"})
     if info.get("update_type") == "cold":
         return ApiResponse(data={"status": "cold", "message": "此版本需要下载完整包", **info})
     do_update(info)
-    return ApiResponse(data={"status": "started"})
+    return ApiResponse(data={"status": "started", "version": info["version"]})
 
 
 @router.get("/update_progress", response_model=ApiResponse)

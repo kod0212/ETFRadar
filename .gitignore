@@ -20,3 +20,5 @@ backend/build/
 backend/*.spec
 backend/static/
 backend/log/
+*.db-shm
+*.db-wal

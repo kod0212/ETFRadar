@@ -22,19 +22,26 @@
     </a-layout-sider>
     <a-layout>
       <!-- 更新横幅 -->
-      <div v-if="updateInfo" style="background: #e6f4ff; padding: 8px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #91caff">
-        <span>🎉 发现新版本 <b>v{{ updateInfo.version }}</b>
-          <span v-if="updateInfo.description" style="color: #666; margin-left: 8px">{{ updateInfo.description }}</span>
-        </span>
-        <a-space>
-          <a-button v-if="updateInfo.update_type !== 'cold'" type="primary" size="small" @click="onStartUpdate">
-            立即更新
-          </a-button>
-          <template v-else>
-            <a-button type="primary" size="small" :href="coldDownloadUrl" target="_blank">下载新版本</a-button>
-          </template>
-          <a-button size="small" @click="updateInfo = null">忽略</a-button>
-        </a-space>
+      <div v-if="updateInfo && !dismissed" style="background: #e6f4ff; padding: 10px 24px; border-bottom: 1px solid #91caff">
+        <div style="display: flex; align-items: center; justify-content: space-between">
+          <span>
+            🆕 新版本 <b>v{{ updateInfo.version }}</b> 可用
+            <span v-if="updateInfo.download_size" style="color: #666; margin-left: 6px">({{ updateInfo.download_size }})</span>
+            <a v-if="updateInfo.changelog" style="margin-left: 10px; font-size: 12px" @click="showChangelog = !showChangelog">
+              {{ showChangelog ? '收起' : '更新内容 ▾' }}
+            </a>
+          </span>
+          <a-space>
+            <template v-if="updateInfo.update_type !== 'cold'">
+              <a-button type="primary" size="small" @click="onStartUpdate">立即更新</a-button>
+            </template>
+            <template v-else>
+              <a-button type="primary" size="small" :href="coldDownloadUrl" target="_blank">下载完整包 ↗</a-button>
+            </template>
+            <a-button size="small" @click="dismissed = true">忽略</a-button>
+          </a-space>
+        </div>
+        <div v-if="showChangelog && updateInfo.changelog" style="margin-top: 8px; padding: 8px 12px; background: #f6f8fa; border-radius: 4px; font-size: 13px; white-space: pre-wrap; color: #333">{{ updateInfo.changelog }}</div>
       </div>
 
       <a-layout-header style="background: #fff; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #f0f0f0">
@@ -64,8 +71,16 @@
         <a-progress :percent="updateProgress.percent" :status="updateProgress.status === 'failed' ? 'exception' : 'active'" />
       </template>
       <div v-if="updateProgress.status === 'done'" style="text-align: center; margin-top: 16px">
-        <a-button type="primary" @click="onRefreshAfterUpdate">刷新页面</a-button>
-        <p style="color: #999; margin-top: 8px; font-size: 12px">{{ countdown }}秒后自动刷新</p>
+        <a-space>
+          <a-button type="primary" @click="onRefreshAfterUpdate">立即刷新</a-button>
+          <a-button @click="showUpdateModal = false">稍后</a-button>
+        </a-space>
+      </div>
+      <div v-if="updateProgress.status === 'failed'" style="text-align: center; margin-top: 16px">
+        <a-space>
+          <a-button type="primary" @click="onStartUpdate">重试</a-button>
+          <a-button @click="showUpdateModal = false">关闭</a-button>
+        </a-space>
       </div>
     </div>
   </a-modal>
@@ -88,11 +103,11 @@ const helpRef = ref()
 
 // 更新相关
 const updateInfo = ref<any>(null)
+const dismissed = ref(false)
+const showChangelog = ref(false)
 const showUpdateModal = ref(false)
 const updateProgress = ref({ status: 'idle', percent: 0, message: '' })
-const countdown = ref(5)
-let progressTimer: any = null
-let countdownTimer: any = null
+let progressTimer: ReturnType<typeof setInterval> | null = null
 
 const currentRoute = computed(() => String(route.name || 'dashboard'))
 const pageTitle = computed(() => {
@@ -126,41 +141,36 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (progressTimer) clearInterval(progressTimer)
-  if (countdownTimer) clearInterval(countdownTimer)
 })
 
 const onStartUpdate = async () => {
   showUpdateModal.value = true
   updateProgress.value = { status: 'downloading', percent: 0, message: '准备更新...' }
   try {
-    await doUpdate()
-    // 轮询进度
+    const res = await doUpdate()
+    const status = res.data.data?.status
+    if (status === 'up_to_date') {
+      updateProgress.value = { status: 'done', percent: 100, message: '已是最新版本' }
+      updateInfo.value = null
+      return
+    }
+    if (status !== 'started') {
+      updateProgress.value = { status: 'failed', percent: 0, message: res.data.data?.message || '更新启动失败' }
+      return
+    }
     progressTimer = setInterval(async () => {
       try {
         const res = await getUpdateProgress()
         updateProgress.value = res.data.data
-        if (res.data.data.status === 'done') {
-          clearInterval(progressTimer)
-          startCountdown()
-        } else if (res.data.data.status === 'failed') {
-          clearInterval(progressTimer)
+        if (res.data.data.status === 'done' || res.data.data.status === 'failed') {
+          if (progressTimer) clearInterval(progressTimer)
+          progressTimer = null
         }
       } catch { /* empty */ }
     }, 500)
   } catch {
     updateProgress.value = { status: 'failed', percent: 0, message: '更新请求失败' }
   }
-}
-
-const startCountdown = () => {
-  countdown.value = 5
-  countdownTimer = setInterval(() => {
-    countdown.value--
-    if (countdown.value <= 0) {
-      clearInterval(countdownTimer)
-      onRefreshAfterUpdate()
-    }
-  }, 1000)
 }
 
 const onRefreshAfterUpdate = () => {

@@ -22,12 +22,6 @@ async def lifespan(app: FastAPI):
     logging.getLogger(__name__).info(f"ETF雷达 v{VERSION} 启动")
     init_seed_data()
     init_db()
-
-    # 启动时静默检查更新（后台线程，不阻塞启动）
-    import threading
-    from app.core.updater import silent_update
-    threading.Thread(target=silent_update, daemon=True).start()
-
     yield
 
 

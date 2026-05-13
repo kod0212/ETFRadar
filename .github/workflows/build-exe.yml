@@ -93,6 +93,20 @@ jobs:
           # 判断更新类型：Release描述含[cold]则为冷更新
           UPDATE_TYPE="hot"
 
+          # 获取更新包大小（兼容 Windows Git Bash）
+          UPDATE_BYTES=$(cat backend/dist/etf-radar-update.zip | wc -c | xargs)
+          UPDATE_SIZE="$(( UPDATE_BYTES / 1024 / 1024 ))MB"
+
+          # 获取 changelog（上一个 tag 到当前的 commit messages）
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            CHANGELOG=$(git log --format="- %s" ${PREV_TAG}..HEAD | head -10)
+          else
+            CHANGELOG="- 版本更新"
+          fi
+          # 转义为 JSON 安全字符串（处理双引号和换行）
+          CHANGELOG_ESCAPED=$(echo "$CHANGELOG" | sed 's/"/\\"/g' | awk '{printf "%s\\n", $0}' | sed 's/\\n$//')
+
           # 生成 version.json
           OSS_BASE="https://${{ env.OSS_BUCKET }}.${{ env.OSS_REGION }}.aliyuncs.com"
           GITHUB_BASE="https://github.com/${{ github.repository }}/releases/download/v${VER}"
@@ -100,7 +114,8 @@ jobs:
           {
             "version": "${VER}",
             "update_type": "${UPDATE_TYPE}",
-            "description": "",
+            "changelog": "${CHANGELOG_ESCAPED}",
+            "download_size": "${UPDATE_SIZE}",
             "github_url": "${GITHUB_BASE}/etf-radar-update.zip",
             "update_url": "${OSS_BASE}/v${VER}/etf-radar-update.zip",
             "full_url_windows": "${OSS_BASE}/v${VER}/ETFRadar-Windows-v${VER}.zip",
